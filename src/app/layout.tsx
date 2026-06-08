@@ -1,15 +1,22 @@
 import type { Metadata } from "next";
-import { Inter } from "next/font/google";
+import { Bricolage_Grotesque, Space_Grotesk } from "next/font/google";
 import "./globals.css";
 
-const inter = Inter({
-  variable: "--font-inter",
+const bricolage = Bricolage_Grotesque({
+  variable: "--font-bricolage",
   subsets: ["latin"],
+  weight: ["400", "500", "600", "700", "800"],
+});
+
+const spaceGrotesk = Space_Grotesk({
+  variable: "--font-space-grotesk",
+  subsets: ["latin"],
+  weight: ["400", "500", "600", "700"],
 });
 
 export const metadata: Metadata = {
   title: "EMVY AI Audit | Business AI Readiness Assessment",
-  description: "Answer a few questions to get personalized AI recommendations for your business. Takes 7-10 minutes.",
+  description: "Answer 10 questions. Get your personalized AI readiness score and a clear roadmap for your business. Takes 7-10 minutes.",
 };
 
 export default function RootLayout({
@@ -19,7 +26,7 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en" className="dark">
-      <body className={`${inter.variable} min-h-full flex flex-col antialiased`}>
+      <body className={`${bricolage.variable} ${spaceGrotesk.variable}`}>
         {children}
       </body>
     </html>
