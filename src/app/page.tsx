@@ -316,14 +316,14 @@ export default function AuditChatbot() {
           <div className="max-w-3xl mx-auto px-5" style={{ paddingTop: "12vh", paddingBottom: "8vh" }}>
             <div className="flex flex-col items-center text-center" style={{ gap: "20px" }}>
               <div style={{ fontSize: "11px", fontWeight: 600, letterSpacing: "0.1em", textTransform: "uppercase", color: "#06b6d4" }}>
-                Free · 5–7 minutes · No commitment
+                Free · 5 minutes · No commitment
               </div>
               <h1 style={{ fontSize: "clamp(36px, 5.5vw, 52px)", fontWeight: 700, letterSpacing: "-0.03em", lineHeight: 1.05, margin: 0 }}>
-                AI audit for your<br />
-                <span style={{ color: "#06b6d4" }}>business</span>
+                Mini AI Audit<br />
+                <span style={{ color: "#06b6d4" }}>for your business</span>
               </h1>
               <p style={{ fontSize: "15px", lineHeight: 1.6, color: "#a1a1aa", maxWidth: "460px", margin: 0 }}>
-                A short chat about how your business runs day to day. You'll get a personalised AI readiness score and a few things you can do this week.
+                A short chat about how your business runs day to day. You'll get a personalised audit report with findings and things you can action this week.
               </p>
               <button
                 onClick={() => {
@@ -506,15 +506,15 @@ export default function AuditChatbot() {
             <div id="report-content">
               {/* Header */}
               <div style={{ marginBottom: "40px" }}>
-                <div style={{ fontSize: "10px", fontWeight: 600, letterSpacing: "0.15em", textTransform: "uppercase", color: "#06b6d4", marginBottom: "8px" }}>AI Business Audit</div>
-                <h1 style={{ fontSize: "28px", fontWeight: 700, letterSpacing: "-0.02em", color: "#ffffff", margin: "0 0 4px 0" }}>EMVY Audit Report</h1>
+                <div style={{ fontSize: "10px", fontWeight: 600, letterSpacing: "0.15em", textTransform: "uppercase", color: "#06b6d4", marginBottom: "8px" }}>Mini AI Audit</div>
+                <h1 style={{ fontSize: "28px", fontWeight: 700, letterSpacing: "-0.02em", color: "#ffffff", margin: "0 0 4px 0" }}>EMVY Mini AI Audit Report</h1>
                 <p style={{ fontSize: "11px", color: "#6b6b70", margin: 0 }}>Prepared for {name} · {email}</p>
                 <div style={{ width: "40px", height: "3px", background: "#06b6d4", marginTop: "16px" }} />
               </div>
 
               {/* Score */}
               <div style={{ background: "#141414", borderRadius: "12px", padding: "28px", marginBottom: "32px", textAlign: "center" }}>
-                <div style={{ fontSize: "10px", fontWeight: 600, letterSpacing: "0.1em", textTransform: "uppercase", color: "#6b6b70", marginBottom: "12px" }}>AI Readiness Score</div>
+                <div style={{ fontSize: "10px", fontWeight: 600, letterSpacing: "0.1em", textTransform: "uppercase", color: "#6b6b70", marginBottom: "12px" }}>Mini AI Audit Score</div>
                 <div style={{ fontSize: "52px", fontWeight: 800, letterSpacing: "-0.03em", lineHeight: 1, color: report.score >= 70 ? "#22c55e" : report.score >= 40 ? "#06b6d4" : "#ef4444" }}>
                   {report.score}<span style={{ fontSize: "20px", fontWeight: 500, color: "#6b6b70" }}>/100</span>
                 </div>
@@ -581,9 +581,9 @@ export default function AuditChatbot() {
 
               {/* CTA */}
               <div style={{ background: "#06b6d4", borderRadius: "12px", padding: "24px", textAlign: "center" }}>
-                <h2 style={{ fontSize: "18px", fontWeight: 700, color: "#0a0a0b", margin: "0 0 8px 0" }}>Ready for a Full Audit?</h2>
+                <h2 style={{ fontSize: "18px", fontWeight: 700, color: "#0a0a0b", margin: "0 0 8px 0" }}>Ready for the Full Picture?</h2>
                 <p style={{ fontSize: "13px", color: "rgba(0,0,0,0.7)", margin: "0 0 16px 0" }}>
-                  Get a comprehensive AI roadmap tailored to your business. Our experts will analyse your workflows and create a custom implementation plan.
+                  This report shows your quick wins. A full audit digs deeper — workflows, bottlenecks, and a complete AI roadmap tailored to your business.
                 </p>
                 <a href="mailto:hello@emvyai.com" style={{ display: "inline-block", fontWeight: 700, background: "#0a0a0b", color: "#06b6d4", padding: "12px 28px", borderRadius: "9999px", textDecoration: "none", fontSize: "14px" }}>
                   Book a Full Audit →
