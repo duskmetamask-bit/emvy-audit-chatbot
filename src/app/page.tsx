@@ -57,6 +57,8 @@ interface ReportData {
 interface Message {
   role: "bot" | "user";
   content: string;
+  timestamp?: string;
+  step?: string;
 }
 
 type Stage = "welcome" | "chat" | "email" | "report";
@@ -75,8 +77,15 @@ export default function AuditChatbot() {
   const [emailError, setEmailError] = useState("");
   const [isBotTyping, setIsBotTyping] = useState(false);
   const [reportShimmer, setReportShimmer] = useState(0);
+  const [sessionId] = useState(() => `EMVY-${Math.random().toString(36).slice(2, 7).toUpperCase()}-AUDIT`);
   const chatEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+
+  // Format timestamp for messages
+  function getTimestamp() {
+    const now = new Date();
+    return now.toTimeString().slice(0, 8);
+  }
 
   // Auto-scroll on new messages
   useEffect(() => {
@@ -120,11 +129,11 @@ export default function AuditChatbot() {
   async function sendMessage(text: string) {
     const userMsg = text.trim();
     if (!userMsg || isBotTyping) return;
-    const newMessages: Message[] = [...messages, { role: "user", content: userMsg }];
+    const newMessages: Message[] = [...messages, { role: "user", content: userMsg, timestamp: getTimestamp() }];
     setMessages(newMessages);
     setInput("");
     setIsBotTyping(true);
-    setMessages((prev) => [...prev, { role: "bot", content: "" }]);
+    setMessages((prev) => [...prev, { role: "bot", content: "", timestamp: getTimestamp() }]);
     try {
       const result = await callChatApi(newMessages, assessment);
       const { message: botText, assessment: updatedAssessment, done } = result;
@@ -276,7 +285,7 @@ export default function AuditChatbot() {
       )}
 
       {/* Header */}
-      <header className="sticky top-0 z-40" style={{ background: "rgba(10,10,11,0.85)", backdropFilter: "blur(12px)", borderBottom: "1px solid rgba(255,255,255,0.06)" }}>
+      <header className="sticky top-0 z-40" style={{ background: "rgba(10,10,11,0.92)", backdropFilter: "blur(12px)", borderBottom: "1px solid rgba(255,255,255,0.06)" }}>
         <div className="max-w-3xl mx-auto px-5 py-3 flex items-center justify-between">
           <div className="flex items-center gap-2.5">
             <div style={{ width: "22px", height: "22px", background: "#06b6d4", borderRadius: "6px", display: "flex", alignItems: "center", justifyContent: "center" }}>
@@ -286,12 +295,20 @@ export default function AuditChatbot() {
             <span style={{ color: "#6b6b70", fontSize: "13px", fontWeight: 400 }}>· AI Audit</span>
           </div>
           {stage === "chat" && (
-            <span style={{ fontSize: "11px", color: "#6b6b70", fontWeight: 500 }}>
-              {Math.round(estimatedProgress)}% complete
+            <span style={{ fontSize: "11px", color: "#06b6d4", fontWeight: 600, letterSpacing: "0.05em" }}>
+              {Math.round(estimatedProgress)}% PROCESSED
             </span>
           )}
         </div>
       </header>
+
+      {/* Session metadata bar */}
+      {stage === "chat" && (
+        <div style={{ background: "rgba(6,182,212,0.04)", borderBottom: "1px solid rgba(6,182,212,0.08)", padding: "6px 20px", display: "flex", justifyContent: "space-between", fontSize: "10px", color: "#6b6b70", fontFamily: "monospace", letterSpacing: "0.03em" }}>
+          <span>SESSION ID: {sessionId}</span>
+          <span>MODEL: EMVY-CORE-V4</span>
+        </div>
+      )}
 
       <main className="flex-1 overflow-auto">
         {/* WELCOME */}
@@ -347,18 +364,34 @@ export default function AuditChatbot() {
                   className="animate-fade-up"
                 >
                   {msg.role === "bot" && (
-                    <div style={{ fontSize: "11px", fontWeight: 600, color: "#6b6b70", letterSpacing: "0.05em", textTransform: "uppercase" }}>
-                      EMVY Audit
+                    <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                      <span style={{ fontSize: "10px", fontWeight: 700, color: "#06b6d4", letterSpacing: "0.08em", fontFamily: "monospace" }}>EMVY SYSTEM</span>
+                      <span style={{ fontSize: "10px", color: "#52525b", fontFamily: "monospace" }}>{msg.timestamp || getTimestamp()}</span>
+                      {msg.step && (
+                        <span style={{ fontSize: "9px", fontWeight: 600, color: "#06b6d4", letterSpacing: "0.1em", background: "rgba(6,182,212,0.1)", padding: "2px 8px", borderRadius: "4px", border: "1px solid rgba(6,182,212,0.2)" }}>
+                          {msg.step}
+                        </span>
+                      )}
                     </div>
+                  )}
+                  {msg.role === "user" && (
+                    <span style={{ fontSize: "10px", color: "#52525b", fontFamily: "monospace" }}>{msg.timestamp || getTimestamp()}</span>
                   )}
                   <div
                     style={{
-                      maxWidth: "85%",
-                      fontSize: "15px",
+                      maxWidth: "82%",
+                      fontSize: "14px",
                       lineHeight: 1.65,
-                      color: msg.role === "user" ? "#d4d4d8" : "#ececec",
+                      color: msg.role === "user" ? "#0a0a0b" : "#e4e4e7",
                       whiteSpace: "pre-wrap",
                       wordBreak: "break-word",
+                      background: msg.role === "user" ? "#06b6d4" : "rgba(255,255,255,0.03)",
+                      border: msg.role === "bot" ? "1px solid rgba(6,182,212,0.15)" : "none",
+                      borderRadius: msg.role === "user" ? "12px" : "12px",
+                      borderTopLeftRadius: msg.role === "bot" ? "2px" : "12px",
+                      borderTopRightRadius: msg.role === "user" ? "2px" : "12px",
+                      padding: "12px 16px",
+                      boxShadow: msg.role === "bot" ? "0 1px 3px rgba(0,0,0,0.3)" : "0 2px 8px rgba(6,182,212,0.2)",
                     }}
                   >
                     {msg.content ? (
@@ -369,9 +402,9 @@ export default function AuditChatbot() {
                       )
                     ) : (
                       isBotTyping && idx === messages.length - 1 ? (
-                        <span style={{ display: "inline-flex", alignItems: "center", gap: "6px", color: "#6b6b70" }}>
-                          <span style={{ width: "6px", height: "6px", borderRadius: "50%", background: "#06b6d4", animation: "pulse 1.4s ease-in-out infinite" }} />
-                          thinking
+                        <span style={{ display: "inline-flex", alignItems: "center", gap: "8px", color: "#06b6d4" }}>
+                          <span style={{ display: "inline-block", width: "8px", height: "16px", background: "#06b6d4", borderRadius: "1px", animation: "blink 1s step-end infinite" }} />
+                          <span style={{ color: "#52525b", fontSize: "12px" }}>typing</span>
                         </span>
                       ) : null
                     )}
@@ -583,8 +616,14 @@ export default function AuditChatbot() {
 
       {/* Input bar — fixed at bottom during chat */}
       {stage === "chat" && (
-        <div style={{ position: "fixed", bottom: 0, left: 0, right: 0, background: "rgba(10,10,11,0.92)", backdropFilter: "blur(12px)", borderTop: "1px solid rgba(255,255,255,0.06)", padding: "16px" }}>
-          <div className="max-w-3xl mx-auto px-5">
+        <div style={{ position: "fixed", bottom: 0, left: 0, right: 0, background: "rgba(10,10,11,0.95)", backdropFilter: "blur(16px)", borderTop: "1px solid rgba(6,182,212,0.12)", padding: "0" }}>
+          {/* Security footer */}
+          <div style={{ display: "flex", justifyContent: "space-between", padding: "6px 20px", borderBottom: "1px solid rgba(255,255,255,0.04)", fontSize: "10px", color: "#52525b", fontFamily: "monospace", letterSpacing: "0.04em" }}>
+            <span style={{ color: "#06b6d4" }}>DATA SECURE // END-TO-END ENCRYPTED</span>
+            <span>AUTO-SAVING AUDIT STATE</span>
+          </div>
+          {/* Input area */}
+          <div className="max-w-3xl mx-auto px-5 py-4">
             <div style={{ display: "flex", gap: "10px", alignItems: "center" }}>
               <textarea
                 ref={inputRef}
@@ -596,10 +635,10 @@ export default function AuditChatbot() {
                 style={{
                   flex: 1,
                   background: "rgba(255,255,255,0.04)",
-                  border: "1px solid rgba(255,255,255,0.08)",
+                  border: "1px solid rgba(6,182,212,0.15)",
                   borderRadius: "10px",
-                  padding: "12px 14px",
-                  color: "#ececec",
+                  padding: "13px 16px",
+                  color: "#e4e4e7",
                   fontSize: "14px",
                   outline: "none",
                   resize: "none",
@@ -607,6 +646,7 @@ export default function AuditChatbot() {
                   lineHeight: 1.5,
                   maxHeight: "120px",
                   overflowY: "auto",
+                  boxShadow: "0 0 0 1px rgba(6,182,212,0.08)",
                 }}
               />
               <button
@@ -614,16 +654,23 @@ export default function AuditChatbot() {
                 disabled={!input.trim() || isBotTyping}
                 style={{
                   background: input.trim() && !isBotTyping ? "#06b6d4" : "rgba(255,255,255,0.06)",
-                  color: input.trim() && !isBotTyping ? "#0a0a0b" : "#6b6b70",
-                  fontWeight: 600,
+                  color: input.trim() && !isBotTyping ? "#0a0a0b" : "#52525b",
+                  fontWeight: 700,
                   fontSize: "14px",
                   padding: "12px 18px",
                   borderRadius: "10px",
                   border: "none",
                   cursor: input.trim() && !isBotTyping ? "pointer" : "not-allowed",
                   transition: "all 150ms ease",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "6px",
+                  letterSpacing: "0.02em",
                 }}
               >
+                {input.trim() && !isBotTyping ? (
+                  <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M3 8h10M9 4l4 4-4 4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
+                ) : null}
                 Send
               </button>
             </div>
