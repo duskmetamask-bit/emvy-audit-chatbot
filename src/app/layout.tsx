@@ -1,22 +1,38 @@
 import type { Metadata } from "next";
-import { Bricolage_Grotesque, Space_Grotesk } from "next/font/google";
+import { Space_Grotesk, Manrope, JetBrains_Mono } from "next/font/google";
 import "./globals.css";
-
-const bricolage = Bricolage_Grotesque({
-  variable: "--font-bricolage",
-  subsets: ["latin"],
-  weight: ["400", "500", "600", "700", "800"],
-});
 
 const spaceGrotesk = Space_Grotesk({
   variable: "--font-space-grotesk",
   subsets: ["latin"],
-  weight: ["400", "500", "600", "700"],
+  weight: ["500", "600", "700"],
+  display: "swap",
+});
+
+const manrope = Manrope({
+  variable: "--font-manrope",
+  subsets: ["latin"],
+  weight: ["400", "500", "600", "700", "800"],
+  display: "swap",
+});
+
+const jetbrainsMono = JetBrains_Mono({
+  variable: "--font-jetbrains-mono",
+  subsets: ["latin"],
+  weight: ["400", "500"],
+  display: "swap",
 });
 
 export const metadata: Metadata = {
-  title: "EMVY AI Audit | Business AI Readiness Assessment",
-  description: "Answer 10 questions. Get your personalized AI readiness score and a clear roadmap for your business. Takes 7-10 minutes.",
+  title: "EMVY AI Audit | 30-day AI roadmap for your business",
+  description:
+    "Answer 13 short questions. Get a personalised 30/60/90 day AI roadmap with the exact steps to remove manual work and grow. Free, 5 minutes, no commitment.",
+  openGraph: {
+    title: "EMVY AI Audit | 30-day AI roadmap for your business",
+    description:
+      "Get a personalised 30/60/90 day AI roadmap in 5 minutes. Free, no commitment.",
+    type: "website",
+  },
 };
 
 export default function RootLayout({
@@ -26,7 +42,9 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en" className="dark">
-      <body className={`${bricolage.variable} ${spaceGrotesk.variable}`}>
+      <body
+        className={`${spaceGrotesk.variable} ${manrope.variable} ${jetbrainsMono.variable}`}
+      >
         {children}
       </body>
     </html>

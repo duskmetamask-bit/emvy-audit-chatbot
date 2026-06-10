@@ -1,7 +1,7 @@
 // MiniMax M2.7 Audit Agent — full tool-calling agent loop.
 // Perceive → Think → Action → Feedback → until task is done.
 
-import { ChatMessage, chatCompletionStream, chatCompletion } from "./llm";
+import { ChatMessage, chatCompletion } from "./llm";
 
 export interface Tool {
   name: string;
@@ -103,7 +103,7 @@ export const AGENT_TOOLS: Tool[] = [
 async function executeTool(
   name: string,
   arguments_: Record<string, unknown>,
-  assessmentState: AssessmentState
+  _assessmentState: AssessmentState
 ): Promise<ToolResult> {
   switch (name) {
     case "store_lead": {
@@ -132,8 +132,9 @@ async function executeTool(
         }).select().single();
         if (error) throw error;
         return { success: true, data };
-      } catch (err: any) {
-        return { success: false, error: err?.message || "Failed to store lead" };
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : "Failed to store lead";
+        return { success: false, error: message };
       }
     }
 
@@ -153,8 +154,9 @@ async function executeTool(
       try {
         const report = await buildReportFromAssessment(assessment_summary, { name, email });
         return { success: true, data: report };
-      } catch (err: any) {
-        return { success: false, error: err?.message || "Failed to generate report" };
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : "Failed to generate report";
+        return { success: false, error: message };
       }
     }
 
@@ -212,45 +214,88 @@ async function buildReportFromAssessment(
     { role: "system", content: REPORT_SYSTEM_PROMPT },
     {
       role: "user",
-      content: `Generate the audit report.\n\nLead: ${lead.name} (${lead.email})\nBusiness: ${assessment.business_name || "unknown"}\nIndustry: ${assessment.industry || "unknown"}\nTeam: ${assessment.team_size || "unknown"}\nCategories covered: ${(assessment.categories_covered || []).join(", ")}\n\nPain points: ${(assessment.pain_points || []).join(" | ")}\nManual tasks: ${(assessment.manual_tasks || []).join(" | ")}\nAI tools: ${assessment.ai_tools || "none"}\nBudget: ${assessment.budget || "unknown"}\nGoal: ${assessment.goal || "unknown"}\n\nFindings: ${(assessment.findings || []).map(f => `[${f.category}/${f.severity}] ${f.text}`).join(" | ")}\n\nReturn ONLY the JSON object described in your instructions.`,
+      content: `Generate the audit roadmap.\n\nLead: ${lead.name} (${lead.email})\nBusiness: ${assessment.business_name || "unknown"}\nIndustry: ${assessment.industry || "unknown"}\nTeam: ${assessment.team_size || "unknown"}\nCategories covered: ${(assessment.categories_covered || []).join(", ")}\n\nPain points: ${(assessment.pain_points || []).join(" | ")}\nManual tasks: ${(assessment.manual_tasks || []).join(" | ")}\nAI tools: ${assessment.ai_tools || "none"}\nBudget: ${assessment.budget || "unknown"}\nGoal: ${assessment.goal || "unknown"}\n\nFindings: ${(assessment.findings || []).map(f => `[${f.category}/${f.severity}] ${f.text}`).join(" | ")}\n\nReturn ONLY the JSON object described in your instructions.`,
     },
   ];
 
   try {
-    const res = await chatCompletion({ messages, temperature: 0.6, maxTokens: 1800 });
+    const res = await chatCompletion({ messages, temperature: 0.6, maxTokens: 2400 });
     const raw = res.choices?.[0]?.message?.content || "";
     const first = raw.indexOf("{");
     const last = raw.lastIndexOf("}");
     if (first !== -1 && last !== -1) {
       const parsed = JSON.parse(raw.slice(first, last + 1));
       if (parsed && typeof parsed === "object" && "score" in parsed) {
-        return parsed as ReportData;
+        return normalizeReportData(parsed, assessment, lead, score, scoreLabel);
       }
     }
   } catch {
     // fall through to fallback
   }
 
-  // Fallback
+  return fallbackRoadmap(assessment, lead, score, scoreLabel);
+}
+
+function normalizeReportData(
+  raw: Record<string, unknown>,
+  assessment: AssessmentState,
+  lead: { name: string; email: string },
+  fallbackScore: number,
+  fallbackLabel: string
+): ReportData {
+  const asArray = (v: unknown): string[] =>
+    Array.isArray(v) ? v.filter((x) => typeof x === "string" && x.trim().length > 0) : [];
+  const score = Number.isFinite(Number(raw.score)) ? Math.round(Number(raw.score)) : fallbackScore;
+  return {
+    score,
+    scoreLabel: typeof raw.scoreLabel === "string" ? raw.scoreLabel : fallbackLabel,
+    scoreBlurb: typeof raw.scoreBlurb === "string" ? raw.scoreBlurb : "Your AI readiness, based on the audit.",
+    businessName: typeof raw.businessName === "string" ? raw.businessName : assessment.business_name || lead.name,
+    industry: typeof raw.industry === "string" ? raw.industry : assessment.industry || "your sector",
+    summary: typeof raw.summary === "string" ? raw.summary : "Based on the audit, there's clear room to remove manual work over the next 90 days.",
+    week1: asArray(raw.week1),
+    weeks24: asArray(raw.weeks24),
+    months23: asArray(raw.months23),
+    nextStep: typeof raw.nextStep === "string" ? raw.nextStep : "Book a 30-minute discovery call and we'll map out a custom 30/60/90 plan for your business.",
+  };
+}
+
+function fallbackRoadmap(
+  assessment: AssessmentState,
+  lead: { name: string; email: string },
+  score: number,
+  scoreLabel: string
+): ReportData {
   return {
     score,
     scoreLabel,
-    scoreBlurb: score >= 70 ? "Well positioned for AI adoption across the operations we covered." : score >= 40 ? "Real opportunity to cut manual work and tighten the operations." : "Significant transformation potential — early stage with clear wins ahead.",
+    scoreBlurb:
+      score >= 70
+        ? "Well positioned for AI adoption across the operations we covered."
+        : score >= 40
+        ? "Real opportunity to cut manual work and tighten the operations."
+        : "Significant transformation potential — early stage with clear wins ahead.",
     businessName: assessment.business_name || lead.name,
     industry: assessment.industry || "your sector",
-    summary: "Based on the audit, there are concrete places to remove manual work and tighten how the business runs day to day.",
-    topFindings: (assessment.findings || []).slice(0, 5).map(f => f.text),
-    recommendations: [
-      "Pick the most painful manual task and automate it end-to-end first — quick win, clear ROI.",
-      "Set up a single source of truth for customer communication and job status.",
-      "Schedule weekly auto-generated reporting so the team sees numbers without manual pulls.",
+    summary:
+      "Based on the audit, the next 90 days can be shaped around three moves: remove the most painful manual work, ship one meaningful automation, and build a habit of AI-assisted decisions.",
+    week1: [
+      "List every recurring task that takes more than 30 minutes a week and rank them by pain.",
+      "Pick the single most painful one — that's your week 1 target.",
+      "Set up a shared Notion or Google Doc so the team can see the roadmap.",
     ],
-    priorityAutomations: [
-      "Highest-pain manual workflow — biggest time leak in your day-to-day.",
-      "Customer follow-up sequence — drives repeat business from existing customers.",
-      "Reporting dashboard — gives visibility in one view without manual pulls.",
+    weeks24: [
+      "Ship the week 1 automation end-to-end. Measure the time it frees up.",
+      "Set up automated invoice or follow-up reminders if cashflow or lead response is leaking.",
+      "Brief the team on a lightweight AI policy — what's allowed, what's reviewed.",
     ],
-    nextStep: "Book a 30-minute discovery call and we'll map out a custom implementation plan for your business.",
+    months23: [
+      "Layer AI into the next-priority workflow (lead qualification, reporting, or scheduling).",
+      "Move to a weekly AI review cadence — what's working, what to retire, what to try next.",
+      "Plan a quarterly audit checkpoint to keep the roadmap honest as the business shifts.",
+    ],
+    nextStep:
+      "Book a 30-minute discovery call and we'll map a custom 30/60/90 plan for your business.",
   };
 }
 
@@ -320,7 +365,6 @@ export async function runAuditAgent(
 
   let step = 0;
   let currentAssessment = { ...assessment };
-  let lastAssistantMessage = "";
   const toolResults: Array<{ tool: string; result: ToolResult }> = [];
 
   while (step < MAX_STEPS) {
@@ -388,9 +432,9 @@ export async function runAuditAgent(
     }
   }
 
-  // Max steps reached — return last message
+  // Max steps reached — return a friendly fallback
   return {
-    message: lastAssistantMessage || "That's all I need for now — thanks!",
+    message: "That's all I need for now — thanks!",
     assessment: { ...currentAssessment, messageCount: messages.filter(m => m.role === "user").length },
     toolResults,
     done: true,
@@ -450,8 +494,8 @@ export interface ReportData {
   businessName: string;
   industry: string;
   summary: string;
-  topFindings: string[];
-  recommendations: string[];
-  priorityAutomations: string[];
+  week1: string[];
+  weeks24: string[];
+  months23: string[];
   nextStep: string;
 }

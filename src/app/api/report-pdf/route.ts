@@ -1,9 +1,6 @@
 // /api/report-pdf — server-side PDF generation using @react-pdf/renderer.
-// Pure JS, no system deps, runs on Vercel.
-//
-// The report content comes from /api/report (M2.7). This route receives the
-// structured report + lead details, renders them to a React-PDF document,
-// and returns the binary PDF as a download.
+// Mirrors the on-screen 30/60/90 roadmap structure so the PDF is just as
+// crafted as the in-browser report. MV monogram in the header.
 
 import { NextRequest } from "next/server";
 import React from "react";
@@ -13,6 +10,8 @@ import {
   Text,
   View,
   StyleSheet,
+  Svg,
+  Path,
   renderToBuffer,
 } from "@react-pdf/renderer";
 
@@ -26,9 +25,9 @@ interface ReportData {
   businessName: string;
   industry: string;
   summary: string;
-  topFindings: string[];
-  recommendations: string[];
-  priorityAutomations: string[];
+  week1: string[];
+  weeks24: string[];
+  months23: string[];
   nextStep: string;
 }
 
@@ -39,21 +38,23 @@ interface ReportRequestBody {
 
 const COLORS = {
   bg: "#FFFFFF",
+  ink: "#0A1118",
   text: "#1A1A1A",
-  textMuted: "#6B6B70",
   textSecondary: "#4A4A4F",
-  accent: "#06B6D4",
-  accentDark: "#0891B2",
-  surface: "#F7F7F8",
+  textMuted: "#6B6B70",
+  accent: "#56D9FF", // EMVY sky cyan — mirrors globals.css
+  accentInk: "#06121A", // dark text on accent surfaces
+  accentDim: "rgba(86, 217, 255, 0.10)",
+  surface: "#F2F4F7",
+  surfaceDark: "#0A1118",
   border: "#E5E5E5",
-  ink: "#0A0A0A",
-  onDark: "#FFFFFF",
-  onDarkMuted: "#C4C4C8",
+  onDark: "#F4F6F8",
+  onDarkMuted: "#B6BEC9",
 };
 
 function scoreColor(score: number): string {
   if (score >= 70) return "#1B8A5A";
-  if (score >= 40) return "#06B6D4";
+  if (score >= 40) return "#0891B2"; // a touch deeper cyan for print
   return "#E85D04";
 }
 
@@ -63,83 +64,74 @@ function formatDate(): string {
 
 const styles = StyleSheet.create({
   page: {
-    paddingTop: 32,
-    paddingBottom: 32,
-    paddingHorizontal: 36,
+    paddingTop: 36,
+    paddingBottom: 36,
+    paddingHorizontal: 40,
     fontSize: 10.5,
     fontFamily: "Helvetica",
     lineHeight: 1.55,
     color: COLORS.text,
     backgroundColor: COLORS.bg,
   },
-  header: {
-    borderBottomWidth: 1,
-    borderBottomColor: COLORS.border,
-    paddingBottom: 10,
-    marginBottom: 18,
+  // Cover
+  coverBrand: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    marginBottom: 28,
   },
-  brand: {
-    fontSize: 8.5,
+  coverBrandText: {
+    fontSize: 9,
     fontFamily: "Helvetica-Bold",
-    letterSpacing: 1.8,
+    letterSpacing: 1.6,
     color: COLORS.accent,
     textTransform: "uppercase",
+    marginLeft: 6,
   },
-  brandSub: {
-    fontSize: 8,
-    color: COLORS.textMuted,
-    marginTop: 2,
-  },
-  meta: {
-    fontSize: 8,
-    color: COLORS.textMuted,
-    marginTop: 6,
-    fontFamily: "Courier",
-  },
-  hero: {
-    marginBottom: 18,
-  },
-  eyebrow: {
-    fontSize: 8.5,
+  coverEyebrow: {
+    fontSize: 9,
     fontFamily: "Helvetica-Bold",
     letterSpacing: 1.4,
     color: COLORS.accent,
     textTransform: "uppercase",
-    marginBottom: 5,
+    marginBottom: 6,
   },
-  heroTitle: {
+  coverTitle: {
     fontSize: 30,
     fontFamily: "Helvetica-Bold",
     letterSpacing: -0.6,
     lineHeight: 1.05,
     color: COLORS.ink,
   },
-  heroTitleAccent: {
-    color: COLORS.accent,
+  coverTitleAccent: {
+    color: COLORS.textMuted,
   },
-  heroSub: {
+  coverSub: {
     fontSize: 11,
     lineHeight: 1.55,
     color: COLORS.textSecondary,
-    marginTop: 8,
+    marginTop: 10,
     maxWidth: 380,
   },
-  accentRule: {
-    width: 28,
-    height: 3,
-    backgroundColor: COLORS.accent,
+  coverMeta: {
+    fontSize: 8.5,
+    color: COLORS.textMuted,
     marginTop: 12,
   },
+  accentRule: {
+    width: 32,
+    height: 3,
+    backgroundColor: COLORS.accent,
+    marginTop: 14,
+    marginBottom: 24,
+  },
+  // Score block
   scoreBlock: {
     backgroundColor: COLORS.surface,
     padding: 18,
-    marginBottom: 16,
+    marginBottom: 22,
     flexDirection: "row",
     alignItems: "center",
-  },
-  scoreNumWrap: {
-    flexDirection: "row",
-    alignItems: "flex-start",
   },
   scoreNum: {
     fontSize: 56,
@@ -169,144 +161,167 @@ const styles = StyleSheet.create({
     lineHeight: 1.5,
     color: COLORS.textSecondary,
   },
+  // Section
   section: {
     marginBottom: 16,
-    paddingBottom: 14,
-    borderBottomWidth: 1,
-    borderBottomColor: COLORS.border,
+    paddingBottom: 4,
+  },
+  sectionHeader: {
+    flexDirection: "row",
+    alignItems: "baseline",
+    gap: 8,
+    marginBottom: 10,
   },
   sectionEyebrow: {
-    fontSize: 8,
+    fontSize: 8.5,
     fontFamily: "Helvetica-Bold",
     letterSpacing: 1.4,
     color: COLORS.accent,
     textTransform: "uppercase",
-    marginBottom: 4,
+  },
+  sectionMeta: {
+    fontSize: 8,
+    color: COLORS.textMuted,
+    fontFamily: "Courier",
   },
   sectionTitle: {
-    fontSize: 17,
+    fontSize: 16,
     fontFamily: "Helvetica-Bold",
-    letterSpacing: -0.4,
-    lineHeight: 1.15,
+    letterSpacing: -0.3,
+    lineHeight: 1.2,
     color: COLORS.ink,
     marginBottom: 10,
   },
-  finding: {
-    paddingTop: 5,
-    paddingBottom: 5,
-    borderTopWidth: 0.5,
-    borderTopColor: "#EFEFEF",
-  },
-  findingFirst: {
-    borderTopWidth: 0,
-  },
-  findingNum: {
-    fontSize: 8,
-    fontFamily: "Courier-Bold",
-    color: COLORS.accent,
-    marginBottom: 2,
-  },
-  findingText: {
-    fontSize: 10,
-    lineHeight: 1.55,
-    color: COLORS.text,
-  },
-  rec: {
+  // Roadmap action
+  action: {
     flexDirection: "row",
-    paddingTop: 4,
-    paddingBottom: 4,
+    paddingTop: 6,
+    paddingBottom: 6,
     borderTopWidth: 0.5,
     borderTopColor: "#EFEFEF",
+    alignItems: "flex-start",
   },
-  recFirst: {
+  actionFirst: {
     borderTopWidth: 0,
   },
-  recArrow: {
-    fontSize: 11,
+  actionNum: {
+    fontSize: 8,
     fontFamily: "Helvetica-Bold",
     color: COLORS.accent,
-    width: 14,
+    width: 22,
+    paddingTop: 1,
   },
-  recText: {
+  actionText: {
     fontSize: 10,
     lineHeight: 1.55,
     color: COLORS.text,
     flex: 1,
   },
-  auto: {
-    backgroundColor: COLORS.surface,
-    borderLeftWidth: 2.5,
-    borderLeftColor: COLORS.accent,
-    padding: 8,
-    marginBottom: 5,
-  },
-  autoLabel: {
-    fontSize: 7.5,
-    fontFamily: "Helvetica-Bold",
-    letterSpacing: 1.4,
-    color: COLORS.accent,
-    textTransform: "uppercase",
-    marginBottom: 2,
-  },
-  autoText: {
-    fontSize: 9.5,
-    lineHeight: 1.5,
-    color: COLORS.text,
-  },
+  // CTA
   ctaBlock: {
-    backgroundColor: COLORS.ink,
-    color: COLORS.onDark,
-    padding: 18,
-    marginTop: 4,
+    backgroundColor: COLORS.surfaceDark,
+    padding: 20,
+    marginTop: 8,
     marginBottom: 12,
   },
   ctaEyebrow: {
-    fontSize: 8,
+    fontSize: 8.5,
     fontFamily: "Helvetica-Bold",
     letterSpacing: 1.4,
     color: COLORS.accent,
     textTransform: "uppercase",
-    marginBottom: 5,
+    marginBottom: 6,
   },
   ctaTitle: {
-    fontSize: 16,
+    fontSize: 17,
     fontFamily: "Helvetica-Bold",
     color: COLORS.onDark,
     lineHeight: 1.2,
     marginBottom: 6,
   },
   ctaBody: {
-    fontSize: 9.5,
-    lineHeight: 1.5,
+    fontSize: 10,
+    lineHeight: 1.55,
     color: COLORS.onDarkMuted,
-    marginBottom: 10,
-    maxWidth: 380,
+    marginBottom: 12,
+    maxWidth: 400,
   },
   ctaBtn: {
     backgroundColor: COLORS.accent,
-    color: COLORS.ink,
-    paddingHorizontal: 14,
-    paddingVertical: 6,
-    fontSize: 9.5,
+    color: COLORS.accentInk,
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    fontSize: 10,
     fontFamily: "Helvetica-Bold",
     alignSelf: "flex-start",
   },
   ctaFine: {
-    fontSize: 7.5,
+    fontSize: 8,
     fontFamily: "Courier",
     color: COLORS.textMuted,
-    marginTop: 10,
+    marginTop: 12,
   },
+  // Footer
   footer: {
+    position: "absolute",
+    bottom: 16,
+    left: 40,
+    right: 40,
     borderTopWidth: 0.5,
     borderTopColor: COLORS.border,
-    paddingTop: 6,
-    fontSize: 7.5,
+    paddingTop: 8,
+    fontSize: 8,
     color: COLORS.textMuted,
     flexDirection: "row",
     justifyContent: "space-between",
   },
 });
+
+function MVMark({ size = 14, color = COLORS.accent }: { size?: number; color?: string }) {
+  return React.createElement(
+    Svg,
+    { width: size, height: size, viewBox: "0 0 40 40" },
+    React.createElement(Path, {
+      d: "M3 4 H11 L20 21 L29 4 H37 V36 H29 V17 L22 28 L18 28 L11 17 V36 H3 Z M16.5 8 L20 14 L23.5 8 Z",
+      fill: color,
+      fillRule: "evenodd",
+    })
+  );
+}
+
+function RoadmapSection({
+  eyebrow,
+  title,
+  actions,
+}: {
+  eyebrow: string;
+  title: string;
+  actions: string[];
+}) {
+  return React.createElement(
+    View,
+    { style: styles.section },
+    React.createElement(
+      View,
+      { style: styles.sectionHeader },
+      React.createElement(Text, { style: styles.sectionEyebrow }, eyebrow),
+      React.createElement(
+        Text,
+        { style: styles.sectionMeta },
+        `· ${actions.length} actions`
+      )
+    ),
+    React.createElement(Text, { style: styles.sectionTitle }, title),
+    ...actions.map((a, i) =>
+      React.createElement(
+        View,
+        { key: `a${i}`, style: [styles.action, i === 0 ? styles.actionFirst : {}] },
+        React.createElement(Text, { style: styles.actionNum }, String(i + 1).padStart(2, "0")),
+        React.createElement(Text, { style: styles.actionText }, a)
+      )
+    )
+  );
+}
 
 function ReportDocument({ report, lead }: { report: ReportData; lead: ReportRequestBody["lead"] }) {
   const date = formatDate();
@@ -317,40 +332,40 @@ function ReportDocument({ report, lead }: { report: ReportData; lead: ReportRequ
     {
       title: `EMVY AI Audit — ${report.businessName}`,
       author: "EMVY AI",
-      subject: "AI Readiness Audit Report",
+      subject: "30/60/90 AI Roadmap",
     },
     React.createElement(
       Page,
       { size: "A4", style: styles.page },
-      // Header
+      // Cover header
       React.createElement(
         View,
-        { style: styles.header },
-        React.createElement(Text, { style: styles.brand }, "EMVY · AI AUDIT"),
-        React.createElement(Text, { style: styles.brandSub }, `Prepared for ${lead.company || report.businessName}`),
-        React.createElement(Text, { style: styles.meta }, `${date}  ·  ${lead.email}`)
+        { style: styles.coverBrand },
+        React.createElement(MVMark, { size: 16 }),
+        React.createElement(Text, { style: styles.coverBrandText }, "EMVY · AI AUDIT")
       ),
-      // Hero
+      React.createElement(Text, { style: styles.coverEyebrow }, "30/60/90 Roadmap"),
       React.createElement(
-        View,
-        { style: styles.hero },
-        React.createElement(Text, { style: styles.eyebrow }, "AI Readiness Audit"),
-        React.createElement(
-          Text,
-          { style: styles.heroTitle },
-          report.businessName,
-          React.createElement(Text, { style: styles.heroTitleAccent }, "\naudit report")
-        ),
-        React.createElement(Text, { style: styles.heroSub }, report.summary),
-        React.createElement(View, { style: styles.accentRule })
+        Text,
+        { style: styles.coverTitle },
+        report.businessName,
+        React.createElement(Text, { style: styles.coverTitleAccent }, " — your AI roadmap")
       ),
+      React.createElement(Text, { style: styles.coverSub }, report.summary),
+      React.createElement(
+        Text,
+        { style: styles.coverMeta },
+        `Prepared for ${name_or_company(lead, report)}  ·  ${date}  ·  ${lead.email}`
+      ),
+      React.createElement(View, { style: styles.accentRule }),
+
       // Score block
       React.createElement(
         View,
         { style: styles.scoreBlock },
         React.createElement(
           View,
-          { style: styles.scoreNumWrap },
+          null,
           React.createElement(Text, { style: [styles.scoreNum, { color: scoreCol }] }, String(report.score)),
           React.createElement(Text, { style: styles.scoreSuffix }, "/100")
         ),
@@ -361,51 +376,27 @@ function ReportDocument({ report, lead }: { report: ReportData; lead: ReportRequ
           React.createElement(Text, { style: styles.scoreBlurb }, report.scoreBlurb)
         )
       ),
-      // Top findings
-      React.createElement(
-        View,
-        { style: styles.section },
-        React.createElement(Text, { style: styles.sectionEyebrow }, "Section 01"),
-        React.createElement(Text, { style: styles.sectionTitle }, "Top findings"),
-        ...report.topFindings.slice(0, 5).map((f, i) =>
-          React.createElement(
-            View,
-            { key: `f${i}`, style: [styles.finding, i === 0 ? styles.findingFirst : {}] },
-            React.createElement(Text, { style: styles.findingNum }, String(i + 1).padStart(2, "0")),
-            React.createElement(Text, { style: styles.findingText }, f)
-          )
-        )
-      ),
-      // Easy wins
-      React.createElement(
-        View,
-        { style: styles.section },
-        React.createElement(Text, { style: styles.sectionEyebrow }, "Section 02"),
-        React.createElement(Text, { style: styles.sectionTitle }, "Easy wins to make this week"),
-        ...report.recommendations.slice(0, 3).map((r, i) =>
-          React.createElement(
-            View,
-            { key: `r${i}`, style: [styles.rec, i === 0 ? styles.recFirst : {}] },
-            React.createElement(Text, { style: styles.recArrow }, "→"),
-            React.createElement(Text, { style: styles.recText }, r)
-          )
-        )
-      ),
-      // Priority automations
-      React.createElement(
-        View,
-        { style: styles.section },
-        React.createElement(Text, { style: styles.sectionEyebrow }, "Section 03"),
-        React.createElement(Text, { style: styles.sectionTitle }, "Workflows to automate first"),
-        ...report.priorityAutomations.slice(0, 3).map((a, i) =>
-          React.createElement(
-            View,
-            { key: `a${i}`, style: styles.auto },
-            React.createElement(Text, { style: styles.autoLabel }, `Priority ${String(i + 1).padStart(2, "0")}`),
-            React.createElement(Text, { style: styles.autoText }, a)
-          )
-        )
-      ),
+
+      // Sections
+      report.week1.length > 0 &&
+        React.createElement(RoadmapSection, {
+          eyebrow: "Week 01",
+          title: "What to do this week",
+          actions: report.week1,
+        }),
+      report.weeks24.length > 0 &&
+        React.createElement(RoadmapSection, {
+          eyebrow: "Weeks 02–04",
+          title: "Your first 30 days",
+          actions: report.weeks24,
+        }),
+      report.months23.length > 0 &&
+        React.createElement(RoadmapSection, {
+          eyebrow: "Months 02–03",
+          title: "The compounding horizon",
+          actions: report.months23,
+        }),
+
       // CTA
       React.createElement(
         View,
@@ -420,15 +411,25 @@ function ReportDocument({ report, lead }: { report: ReportData; lead: ReportRequ
         React.createElement(Text, { style: styles.ctaBtn }, "Book a discovery call →"),
         React.createElement(Text, { style: styles.ctaFine }, "emvyai.com  ·  hello@emvyai.com  ·  Sydney, AU")
       ),
+
       // Footer
       React.createElement(
         View,
         { style: styles.footer, fixed: true },
         React.createElement(Text, {}, `EMVY AI Audit  ·  ${lead.email}`),
-        React.createElement(Text, {}, date)
+        React.createElement(Text, {}, `Page 1  ·  ${date}`)
       )
     )
   );
+}
+
+function name_or_company(
+  lead: ReportRequestBody["lead"],
+  report: ReportData
+): string {
+  if (lead.company) return lead.company;
+  if (report.businessName) return report.businessName;
+  return lead.name || "Your business";
 }
 
 export async function POST(req: NextRequest) {
@@ -449,7 +450,7 @@ export async function POST(req: NextRequest) {
   }
 
   try {
-    const element = React.createElement(ReportDocument, { report: body.report, lead: body.lead }) as any;
+    const element = React.createElement(ReportDocument, { report: body.report, lead: body.lead }) as unknown as React.ReactElement<Record<string, unknown>>;
     const buffer = await renderToBuffer(element);
     const slug = (body.report.businessName || "audit")
       .toLowerCase()
@@ -461,12 +462,13 @@ export async function POST(req: NextRequest) {
       status: 200,
       headers: {
         "Content-Type": "application/pdf",
-        "Content-Disposition": `attachment; filename="emvy-audit-${slug}.pdf"`,
+        "Content-Disposition": `attachment; filename="emvy-roadmap-${slug}.pdf"`,
         "Cache-Control": "no-store",
       },
     });
-  } catch (err: any) {
-    return new Response(JSON.stringify({ error: "PDF generation failed", detail: err?.message }), {
+  } catch (err: unknown) {
+    const detail = err instanceof Error ? err.message : "Unknown error";
+    return new Response(JSON.stringify({ error: "PDF generation failed", detail }), {
       status: 500,
       headers: { "Content-Type": "application/json" },
     });

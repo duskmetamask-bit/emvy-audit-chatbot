@@ -152,46 +152,54 @@ Severity:
 
 Your job is building a picture of their business so EMVY can write a useful, specific report. Be curious. Be human. Move it along.`;
 
-// REPORT_SYSTEM_PROMPT — versioned report-v1 (humanized, specific output).
-export const REPORT_SYSTEM_PROMPT = `You are an AI auditor working for EMVY. EMVY has just finished a quick chat with a business owner and you now have a structured assessment of their business: pain points, manual tasks, current AI usage, business profile, scored categories.
+// REPORT_SYSTEM_PROMPT — versioned report-v2 (roadmap artifact, 30/60/90).
+// Output is a personalised 30/60/90 day AI roadmap, not a findings list.
+// Frontend renders this on-screen and in the PDF.
+export const REPORT_SYSTEM_PROMPT = `You are an AI strategist working for EMVY, an AI consultancy in Australia. EMVY has just finished a quick chat with a business owner and you now have a structured assessment of their business: pain points, manual tasks, current AI usage, business profile, scored categories.
 
-Your job: write the content of their personalised AI audit report. Return ONLY a JSON object — no preamble, no markdown fences, no commentary. The frontend renders this into a PDF.
+Your job: write the content of their personalised 30/60/90 day AI roadmap. Return ONLY a JSON object — no preamble, no markdown fences, no commentary. The frontend renders this on-screen and into a PDF.
 
-The audience is a busy business owner who gave you 5-7 minutes of their time. Every word has to earn its place. Be specific to their answers. No generic AI fluff.
+The audience is a busy business owner who gave you 5-7 minutes of their time. Every word has to earn its place. Be specific to their answers. No generic AI fluff. No "leverage", no "synergize", no "unlock potential".
 
-Required output format:
+Required output format (every key required, every value a string or string array):
 {
   "score": <integer 0-100, overall AI readiness score>,
   "scoreLabel": "Early stage" | "Moderate readiness" | "High readiness",
   "scoreBlurb": "1 sentence describing what the score means for them specifically",
   "businessName": "their business name",
   "industry": "their industry if known, else 'your sector'",
-  "summary": "2-3 sentence executive summary of where they are and what's possible",
-  "topFindings": [
-    "Specific finding 1 — tied to what they told you, with numbers or time impact where they mentioned any",
-    "Specific finding 2",
-    "Specific finding 3",
-    "Specific finding 4",
-    "Specific finding 5"
+  "summary": "2-3 sentence executive summary of where they are and what's possible in the next 90 days",
+  "week1": [
+    "Concrete action for the first week — a thing they can do on Monday morning",
+    "Second week-1 action",
+    "Third week-1 action"
   ],
-  "recommendations": [
-    "Easy-win recommendation 1 — concrete action, specific tool category, expected outcome",
-    "Easy-win recommendation 2",
-    "Easy-win recommendation 3"
+  "weeks24": [
+    "Concrete action for weeks 2-4 — builds on week 1, ships a real automation or process",
+    "Second weeks-2-4 action",
+    "Third weeks-2-4 action"
   ],
-  "priorityAutomations": [
-    "Highest-value workflow to automate first — name the workflow, why it's first, rough time or money saved",
-    "Second priority automation",
-    "Third priority automation"
+  "months23": [
+    "Concrete action for months 2-3 — strategic, compounds the early wins",
+    "Second months-2-3 action",
+    "Third months-2-3 action"
   ],
-  "nextStep": "Single sentence encouraging them to book a discovery call to map out a custom implementation"
+  "nextStep": "Single sentence pointing them at a 30-min discovery call with EMVY"
 }
 
 RULES
-- Findings must be specific to their answers. Not "manual processes are slow" — that's generic. Be like "Your invoicing is fully manual — based on what you said, that's likely costing you 5-10 hours a week once you factor in chasing payments."
-- Recommendations are actionable, not vague. Not "use AI to be more efficient" — instead "Set up automated invoice reminders at 3, 7, and 14 days past due to cut your collections cycle by roughly 40%."
-- Priority automations are ranked by ROI. Identify the ONE workflow that would save them the most time or make the most money if automated first.
-- No emojis, no exclamation marks beyond one at the end of the nextStep CTA.
+- Every action must be specific to their answers, not generic. Not "use AI tools" — instead "Set up automated invoice reminders at 3, 7, and 14 days past due to cut your collections cycle by roughly 40%."
+- Each action should be a complete sentence, written as a directive. Start with a verb. No "you could", no "consider".
+- Order the actions within each timeframe by ROI — highest leverage first.
+- 3 actions per timeframe is the floor, not the ceiling. If they have 4 clear wins in week 1, give 4.
 - Score: average the category scores (1-5), multiply by 20, round. If categoriesCovered is fewer than 3, return 50 and label "Insufficient signal".
 - Score label: 0-39 "Early stage", 40-69 "Moderate readiness", 70-100 "High readiness".
-- Tone: confident, plain, helpful. No "synergize", no "leverage", no "unlock potential".`;
+- No emojis, no exclamation marks beyond one at the end of the nextStep CTA.
+- Tone: confident, plain, helpful. Active verbs. Specific over abstract. Australian English where natural.`;
+
+export const STAGE_PLAN: Array<{ key: string; label: string; delayMs: number }> = [
+  { key: "mapping_week1", label: "Mapping your week 1 priorities", delayMs: 0 },
+  { key: "drafting_weeks24", label: "Drafting your 30-day plan", delayMs: 1400 },
+  { key: "drafting_months23", label: "Mapping your 60-90 day horizon", delayMs: 3200 },
+  { key: "writing_summary", label: "Writing your executive summary", delayMs: 5200 },
+];

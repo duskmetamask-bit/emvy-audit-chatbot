@@ -1,16 +1,19 @@
 "use client";
 
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
 import { createClient } from "@supabase/supabase-js";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { EmvyLogo } from "@/components/EmvyLogo";
+import { BuildTheater, BuildStage } from "@/components/BuildTheater";
+import { RoadmapSection } from "@/components/RoadmapSection";
 
-// Supabase client
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || "https://rrjktvvnzjzlfquaghut.supabase.co";
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "eyJhbG...IJWw";
 const supabase = createClient(supabaseUrl, supabaseAnonKey);
 
-// Assessment shape — mirrors lib/agent.ts
+const BOOKING_URL = "https://emvyai.com/book";
+
 interface Assessment {
   businessName?: string;
   businessDescription?: string;
@@ -48,9 +51,9 @@ interface ReportData {
   businessName: string;
   industry: string;
   summary: string;
-  topFindings: string[];
-  recommendations: string[];
-  priorityAutomations: string[];
+  week1: string[];
+  weeks24: string[];
+  months23: string[];
   nextStep: string;
 }
 
@@ -61,7 +64,14 @@ interface Message {
   step?: string;
 }
 
-type Stage = "welcome" | "chat" | "email" | "report";
+type Stage = "welcome" | "chat" | "email" | "building" | "report";
+
+const STAGE_PLAN: Array<{ key: string; label: string }> = [
+  { key: "mapping_week1", label: "Mapping your week 1 priorities" },
+  { key: "drafting_weeks24", label: "Drafting your 30-day plan" },
+  { key: "drafting_months23", label: "Mapping your 60–90 day horizon" },
+  { key: "writing_summary", label: "Writing your executive summary" },
+];
 
 export default function AuditChatbot() {
   const [stage, setStage] = useState<Stage>("welcome");
@@ -73,19 +83,15 @@ export default function AuditChatbot() {
   const [assessment, setAssessment] = useState<Assessment>(emptyAssessment());
   const [report, setReport] = useState<ReportData | null>(null);
   const [isGeneratingPdf, setIsGeneratingPdf] = useState(false);
-  const [isGeneratingReport, setIsGeneratingReport] = useState(false);
-  const [emailError, setEmailError] = useState("");
   const [isBotTyping, setIsBotTyping] = useState(false);
-  const [reportShimmer, setReportShimmer] = useState(0);
-  const [sessionId] = useState(() => `EMVY-${Math.random().toString(36).slice(2, 7).toUpperCase()}-AUDIT`);
+  const [emailError, setEmailError] = useState("");
+  const [buildStages, setBuildStages] = useState<BuildStage[]>(() =>
+    STAGE_PLAN.map((s) => ({ key: s.key, label: s.label, status: "pending" as const }))
+  );
+  const [scoreDisplay, setScoreDisplay] = useState(0);
+
   const chatEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
-
-  // Format timestamp for messages
-  function getTimestamp() {
-    const now = new Date();
-    return now.toTimeString().slice(0, 8);
-  }
 
   // Auto-scroll on new messages
   useEffect(() => {
@@ -97,17 +103,12 @@ export default function AuditChatbot() {
     if (stage === "chat") inputRef.current?.focus();
   }, [stage]);
 
-  // Progress shimmer for top bar
-  useEffect(() => {
-    if (stage !== "chat") return;
-    const id = setInterval(() => setReportShimmer((n) => n + 1), 30);
-    return () => clearInterval(id);
-  }, [stage]);
+  function getTimestamp() {
+    return new Date().toTimeString().slice(0, 8);
+  }
 
-  // Estimate progress: 1 line per category, capped at 10
   const estimatedProgress = Math.min(100, (assessment.categoriesCovered.length / 10) * 100);
 
-  // callChatApi now returns JSON (not SSE) since we use the MiniMax agent with tool calling
   async function callChatApi(history: Message[], currentAssessment: Assessment, signal?: AbortSignal) {
     const res = await fetch("/api/chat", {
       method: "POST",
@@ -115,9 +116,7 @@ export default function AuditChatbot() {
       body: JSON.stringify({ history, assessment: currentAssessment }),
       signal,
     });
-    if (!res.ok) {
-      throw new Error("Chat request failed: " + res.status);
-    }
+    if (!res.ok) throw new Error("Chat request failed: " + res.status);
     return res.json() as Promise<{
       message: string;
       assessment: Assessment;
@@ -136,7 +135,7 @@ export default function AuditChatbot() {
     setMessages((prev) => [...prev, { role: "bot", content: "", timestamp: getTimestamp() }]);
     try {
       const result = await callChatApi(newMessages, assessment);
-      const { message: botText, assessment: updatedAssessment, done } = result;
+      const { message: botText, assessment: updatedAssessment } = result;
       setAssessment(updatedAssessment);
       setIsBotTyping(false);
       if (!botText) {
@@ -165,7 +164,7 @@ export default function AuditChatbot() {
         });
         if (i >= botText.length) clearInterval(interval);
       }, 12);
-    } catch (err) {
+    } catch {
       setIsBotTyping(false);
       setMessages((prev) => {
         const copy = [...prev];
@@ -193,46 +192,134 @@ export default function AuditChatbot() {
     return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
   }
 
+  function activateStage(stageKey: string) {
+    setBuildStages((prev) => {
+      const idx = prev.findIndex((s) => s.key === stageKey);
+      if (idx === -1) return prev;
+      return prev.map((s, i) => {
+        if (i < idx) return { ...s, status: "done" as const };
+        if (i === idx) return { ...s, status: "active" as const };
+        return s;
+      });
+    });
+  }
+
+  function markAllDone() {
+    setBuildStages((prev) => prev.map((s) => ({ ...s, status: "done" as const })));
+  }
+
+  const animateScore = useCallback((target: number) => {
+    const duration = 1200;
+    const start = performance.now();
+    const tick = (now: number) => {
+      const elapsed = now - start;
+      const t = Math.min(1, elapsed / duration);
+      // ease-out cubic
+      const eased = 1 - Math.pow(1 - t, 3);
+      setScoreDisplay(Math.round(target * eased));
+      if (t < 1) requestAnimationFrame(tick);
+    };
+    requestAnimationFrame(tick);
+  }, []);
+
   async function handleEmailSubmit() {
     setEmailError("");
     if (!name.trim()) { setEmailError("Please enter your name"); return; }
     if (!email.trim() || !validateEmail(email)) { setEmailError("Please enter a valid email address"); return; }
-    setIsGeneratingReport(true);
-    const finalAssessment: Assessment = { ...assessment, messageCount: messages.filter((m) => m.role === "user").length };
-    try {
-      await supabase.from("leads").insert({
-        name,
-        email,
-        company: company || null,
-        business_name: finalAssessment.businessName || null,
-        business_description: finalAssessment.businessDescription || null,
-        team_size: finalAssessment.teamSize || null,
-        pain_points: finalAssessment.painPoints.join(" | ") || null,
-        manual_tasks: finalAssessment.manualTasks.join(" | ") || null,
-        ai_tools: finalAssessment.aiTools || null,
-        budget: finalAssessment.budget || null,
-        goal_6months: finalAssessment.goal || null,
-        obstacles: finalAssessment.obstacles || null,
-        industry: finalAssessment.industry || null,
-        assessment: finalAssessment,
-      });
-    } catch (err) {
-      console.error("Supabase error:", err);
-    }
+
+    setStage("building");
+    setBuildStages(STAGE_PLAN.map((s) => ({ key: s.key, label: s.label, status: "pending" as const })));
+    setScoreDisplay(0);
+
+    const finalAssessment: Assessment = {
+      ...assessment,
+      messageCount: messages.filter((m) => m.role === "user").length,
+    };
+
+    // Persist lead to Supabase in the background. Don't block the build theater.
+    void (async () => {
+      try {
+        await supabase.from("leads").insert({
+          name,
+          email,
+          company: company || null,
+          business_name: finalAssessment.businessName || null,
+          business_description: finalAssessment.businessDescription || null,
+          team_size: finalAssessment.teamSize || null,
+          pain_points: finalAssessment.painPoints.join(" | ") || null,
+          manual_tasks: finalAssessment.manualTasks.join(" | ") || null,
+          ai_tools: finalAssessment.aiTools || null,
+          budget: finalAssessment.budget || null,
+          goal_6months: finalAssessment.goal || null,
+          obstacles: finalAssessment.obstacles || null,
+          industry: finalAssessment.industry || null,
+          assessment: finalAssessment,
+        });
+      } catch (err) {
+        console.error("Supabase error:", err);
+      }
+    })();
+
+    // Open the SSE stream.
     try {
       const res = await fetch("/api/report", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ assessment: finalAssessment, name, email, company }),
       });
-      if (!res.ok) throw new Error("Report generation failed");
-      const data = (await res.json()) as ReportData;
-      setReport(data);
-      setStage("report");
+      if (!res.ok || !res.body) throw new Error("Report stream failed");
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+
+        let lineEnd;
+        while ((lineEnd = buffer.indexOf("\n\n")) !== -1) {
+          const chunk = buffer.slice(0, lineEnd);
+          buffer = buffer.slice(lineEnd + 2);
+          parseSseChunk(chunk);
+        }
+      }
     } catch (err) {
+      console.error("Report stream error:", err);
       setEmailError("Report generation failed — try again in a moment.");
-    } finally {
-      setIsGeneratingReport(false);
+      setStage("email");
+    }
+  }
+
+  function parseSseChunk(chunk: string) {
+    const lines = chunk.split("\n");
+    let event = "message";
+    let data = "";
+    for (const line of lines) {
+      if (line.startsWith("event: ")) event = line.slice(7).trim();
+      else if (line.startsWith("data: ")) data += line.slice(6);
+    }
+    if (!data) return;
+    let payload: Record<string, unknown>;
+    try {
+      payload = JSON.parse(data) as Record<string, unknown>;
+    } catch {
+      return;
+    }
+    if (event === "status") {
+      const stage = typeof payload.stage === "string" ? payload.stage : "";
+      if (stage === "ready" || stage === "fallback") {
+        markAllDone();
+      } else if (stage) {
+        activateStage(stage);
+      }
+    } else if (event === "data") {
+      if (payload.report) {
+        setReport(payload.report as ReportData);
+        animateScore((payload.report as ReportData).score);
+        // Slight pause so the user sees the "Ready" state before the report slides in.
+        setTimeout(() => setStage("report"), 600);
+      }
     }
   }
 
@@ -254,7 +341,7 @@ export default function AuditChatbot() {
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      a.download = `emvy-audit-${(report.businessName || "report").toLowerCase().replace(/[^a-z0-9]+/g, "-")}.pdf`;
+      a.download = `emvy-roadmap-${(report.businessName || "report").toLowerCase().replace(/[^a-z0-9]+/g, "-")}.pdf`;
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
@@ -267,416 +354,883 @@ export default function AuditChatbot() {
   }
 
   return (
-    <div className="min-h-screen flex flex-col" style={{ background: "#0a0a0b", color: "#ececec" }}>
-      {/* Top progress shimmer */}
-      {stage === "chat" && (
-        <div className="fixed top-0 left-0 right-0 z-50" style={{ height: "2px", background: "rgba(255,255,255,0.04)" }}>
+    <div
+      className="min-h-screen flex flex-col"
+      style={{ background: "var(--background)", color: "var(--foreground)" }}
+    >
+      {/* Header */}
+      <header
+        className="sticky top-0 z-40"
+        style={{
+          background: "rgba(10, 17, 24, 0.85)",
+          backdropFilter: "blur(12px)",
+          WebkitBackdropFilter: "blur(12px)",
+          borderBottom: "1px solid var(--border-subtle)",
+        }}
+      >
+        <div
+          className="mx-auto"
+          style={{
+            maxWidth: 1180,
+            padding: "14px 24px",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+          }}
+        >
           <div
             style={{
-              height: "100%",
-              width: `${estimatedProgress}%`,
-              background: "linear-gradient(90deg, transparent, #06b6d4, transparent)",
-              backgroundSize: "200% 100%",
-              transition: "width 600ms cubic-bezier(0.16, 1, 0.3, 1)",
-              animation: "shimmer 2.4s linear infinite",
+              display: "flex",
+              alignItems: "center",
+              gap: 10,
+              color: "inherit",
             }}
-          />
-        </div>
-      )}
-
-      {/* Header */}
-      <header className="sticky top-0 z-40" style={{ background: "rgba(10,10,11,0.92)", backdropFilter: "blur(12px)", borderBottom: "1px solid rgba(255,255,255,0.06)" }}>
-        <div className="max-w-3xl mx-auto px-5 py-3 flex items-center justify-between">
-          <div className="flex items-center gap-2.5">
-            <div style={{ width: "22px", height: "22px", background: "#06b6d4", borderRadius: "6px", display: "flex", alignItems: "center", justifyContent: "center" }}>
-              <span style={{ fontWeight: 800, fontSize: "12px", color: "#0a0a0b" }}>E</span>
-            </div>
-            <span style={{ fontWeight: 600, fontSize: "14px", letterSpacing: "-0.01em" }}>EMVY</span>
-            <span style={{ color: "#6b6b70", fontSize: "13px", fontWeight: 400 }}>· AI Audit</span>
+            aria-label="EMVY AI Audit"
+          >
+            <EmvyLogo size={22} color="var(--accent)" />
+            <span
+              style={{
+                fontFamily: "var(--font-display), 'Space Grotesk', system-ui, sans-serif",
+                fontWeight: 600,
+                fontSize: 15,
+                letterSpacing: "-0.02em",
+              }}
+            >
+              EMVY
+            </span>
+            <span style={{ color: "var(--text-muted)", fontSize: 14, fontWeight: 400 }}>· AI Audit</span>
           </div>
           {stage === "chat" && (
-            <span style={{ fontSize: "11px", color: "#06b6d4", fontWeight: 600, letterSpacing: "0.05em" }}>
-              {Math.round(estimatedProgress)}% PROCESSED
+            <span className="label-meta" style={{ color: "var(--text-secondary)" }}>
+              <span style={{ color: "var(--accent)", fontWeight: 500 }}>
+                {Math.round(estimatedProgress)}%
+              </span>{" "}
+              through
             </span>
           )}
         </div>
+
+        {/* Slim progress line during chat */}
+        {stage === "chat" && (
+          <div className="progress-track" style={{ height: 1 }}>
+            <div
+              className="progress-fill"
+              style={{ width: `${estimatedProgress}%` }}
+            />
+          </div>
+        )}
       </header>
 
-      {/* Session metadata bar */}
-      {stage === "chat" && (
-        <div style={{ background: "rgba(6,182,212,0.04)", borderBottom: "1px solid rgba(6,182,212,0.08)", padding: "6px 20px", display: "flex", justifyContent: "space-between", fontSize: "10px", color: "#6b6b70", fontFamily: "monospace", letterSpacing: "0.03em" }}>
-          <span>SESSION ID: {sessionId}</span>
-          <span>MODEL: EMVY-CORE-V4</span>
-        </div>
-      )}
-
       <main className="flex-1 overflow-auto">
-        {/* WELCOME */}
-        {stage === "welcome" && (
-          <div className="max-w-3xl mx-auto px-5" style={{ paddingTop: "12vh", paddingBottom: "8vh" }}>
-            <div className="flex flex-col items-center text-center" style={{ gap: "20px" }}>
-              <div style={{ fontSize: "11px", fontWeight: 600, letterSpacing: "0.1em", textTransform: "uppercase", color: "#06b6d4" }}>
-                Free · 5 minutes · No commitment
-              </div>
-              <h1 style={{ fontSize: "clamp(36px, 5.5vw, 52px)", fontWeight: 700, letterSpacing: "-0.03em", lineHeight: 1.05, margin: 0 }}>
-                Mini AI Audit<br />
-                <span style={{ color: "#06b6d4" }}>for your business</span>
-              </h1>
-              <p style={{ fontSize: "15px", lineHeight: 1.6, color: "#a1a1aa", maxWidth: "460px", margin: 0 }}>
-                A short chat about how your business runs day to day. You'll get a personalised audit report with findings and things you can action this week.
-              </p>
-              <button
-                onClick={() => {
-                  setStage("chat");
-                  void sendMessage("Hey, ready when you are.");
-                }}
-                style={{
-                  marginTop: "12px",
-                  background: "#06b6d4",
-                  color: "#0a0a0b",
-                  fontWeight: 600,
-                  fontSize: "14px",
-                  padding: "12px 28px",
-                  borderRadius: "9999px",
-                  border: "none",
-                  cursor: "pointer",
-                }}
-              >
-                Start audit →
-              </button>
-            </div>
-          </div>
-        )}
-
-        {/* CHAT */}
+        {stage === "welcome" && <WelcomeScreen onStart={() => { setStage("chat"); void sendMessage("Hey, ready when you are."); }} />}
         {stage === "chat" && (
-          <div className="max-w-3xl mx-auto px-5" style={{ paddingTop: "32px", paddingBottom: "160px" }}>
-            <div style={{ display: "flex", flexDirection: "column", gap: "28px" }}>
-              {messages.map((msg, idx) => (
-                <div
-                  key={idx}
-                  style={{
-                    display: "flex",
-                    flexDirection: "column",
-                    alignItems: msg.role === "user" ? "flex-end" : "flex-start",
-                    gap: "6px",
-                  }}
-                  className="animate-fade-up"
-                >
-                  {msg.role === "bot" && (
-                    <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
-                      <span style={{ fontSize: "10px", fontWeight: 700, color: "#06b6d4", letterSpacing: "0.08em", fontFamily: "monospace" }}>EMVY SYSTEM</span>
-                      <span style={{ fontSize: "10px", color: "#52525b", fontFamily: "monospace" }}>{msg.timestamp || getTimestamp()}</span>
-                      {msg.step && (
-                        <span style={{ fontSize: "9px", fontWeight: 600, color: "#06b6d4", letterSpacing: "0.1em", background: "rgba(6,182,212,0.1)", padding: "2px 8px", borderRadius: "4px", border: "1px solid rgba(6,182,212,0.2)" }}>
-                          {msg.step}
-                        </span>
-                      )}
-                    </div>
-                  )}
-                  {msg.role === "user" && (
-                    <span style={{ fontSize: "10px", color: "#52525b", fontFamily: "monospace" }}>{msg.timestamp || getTimestamp()}</span>
-                  )}
-                  <div
-                    style={{
-                      maxWidth: "82%",
-                      fontSize: "14px",
-                      lineHeight: 1.65,
-                      color: msg.role === "user" ? "#0a0a0b" : "#e4e4e7",
-                      whiteSpace: "pre-wrap",
-                      wordBreak: "break-word",
-                      background: msg.role === "user" ? "#06b6d4" : "rgba(255,255,255,0.03)",
-                      border: msg.role === "bot" ? "1px solid rgba(6,182,212,0.15)" : "none",
-                      borderRadius: msg.role === "user" ? "12px" : "12px",
-                      borderTopLeftRadius: msg.role === "bot" ? "2px" : "12px",
-                      borderTopRightRadius: msg.role === "user" ? "2px" : "12px",
-                      padding: "12px 16px",
-                      boxShadow: msg.role === "bot" ? "0 1px 3px rgba(0,0,0,0.3)" : "0 2px 8px rgba(6,182,212,0.2)",
-                    }}
-                  >
-                    {msg.content ? (
-                      msg.role === "bot" ? (
-                        <ReactMarkdown remarkPlugins={[remarkGfm]}>{msg.content}</ReactMarkdown>
-                      ) : (
-                        msg.content
-                      )
-                    ) : (
-                      isBotTyping && idx === messages.length - 1 ? (
-                        <span style={{ display: "inline-flex", alignItems: "center", gap: "8px", color: "#06b6d4" }}>
-                          <span style={{ display: "inline-block", width: "8px", height: "16px", background: "#06b6d4", borderRadius: "1px", animation: "blink 1s step-end infinite" }} />
-                          <span style={{ color: "#52525b", fontSize: "12px" }}>typing</span>
-                        </span>
-                      ) : null
-                    )}
-                  </div>
-                </div>
-              ))}
-              <div ref={chatEndRef} />
-
-              {/* Email transition button — appears when agent signals ready */}
-              {assessment.readyForEmail && !isBotTyping && (
-                <div style={{ display: "flex", justifyContent: "flex-start" }}>
-                  <button
-                    onClick={() => setStage("email")}
-                    style={{
-                      background: "#06b6d4",
-                      color: "#0a0a0b",
-                      fontWeight: 600,
-                      fontSize: "14px",
-                      padding: "11px 22px",
-                      borderRadius: "10px",
-                      border: "none",
-                      cursor: "pointer",
-                      marginTop: "4px",
-                    }}
-                    className="animate-fade-up"
-                  >
-                    Get my report →
-                  </button>
-                </div>
-              )}
-            </div>
-          </div>
+          <ChatStage
+            messages={messages}
+            input={input}
+            setInput={setInput}
+            isBotTyping={isBotTyping}
+            onSend={handleSend}
+            onKeyDown={handleKeyDown}
+            inputRef={inputRef}
+            assessment={assessment}
+            onGoToEmail={() => setStage("email")}
+            chatEndRef={chatEndRef}
+          />
         )}
-
-        {/* EMAIL */}
         {stage === "email" && (
-          <div className="max-w-xl mx-auto px-5" style={{ paddingTop: "10vh", paddingBottom: "8vh" }}>
-            <div className="flex flex-col" style={{ gap: "20px" }}>
-              <div style={{ fontSize: "11px", fontWeight: 600, letterSpacing: "0.1em", textTransform: "uppercase", color: "#06b6d4" }}>
-                Your report
-              </div>
-              <h2 style={{ fontSize: "clamp(32px, 5vw, 44px)", fontWeight: 700, letterSpacing: "-0.025em", lineHeight: 1.1, margin: 0 }}>
-                Almost there
-              </h2>
-              <p style={{ fontSize: "15px", lineHeight: 1.6, color: "#a1a1aa", margin: 0, maxWidth: "440px" }}>
-                Drop your details and we'll generate your personalised AI audit report. Takes about 30 seconds.
-              </p>
-              <div style={{ display: "flex", flexDirection: "column", gap: "14px", maxWidth: "380px", marginTop: "12px" }}>
-                <input
-                  type="text"
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                  placeholder="Full name"
-                  style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: "10px", padding: "12px 14px", color: "#ececec", fontSize: "14px", outline: "none" }}
-                />
-                <input
-                  type="email"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  placeholder="Email address"
-                  style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: "10px", padding: "12px 14px", color: "#ececec", fontSize: "14px", outline: "none" }}
-                />
-                <input
-                  type="text"
-                  value={company}
-                  onChange={(e) => setCompany(e.target.value)}
-                  placeholder="Company name (optional)"
-                  style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: "10px", padding: "12px 14px", color: "#ececec", fontSize: "14px", outline: "none" }}
-                />
-                {emailError && (
-                  <p style={{ color: "#ef4444", fontSize: "13px", margin: 0 }}>{emailError}</p>
-                )}
-                <button
-                  onClick={handleEmailSubmit}
-                  disabled={isGeneratingReport}
-                  style={{
-                    background: isGeneratingReport ? "#0891b2" : "#06b6d4",
-                    color: "#0a0a0b",
-                    fontWeight: 600,
-                    fontSize: "14px",
-                    padding: "13px 24px",
-                    borderRadius: "10px",
-                    border: "none",
-                    cursor: isGeneratingReport ? "not-allowed" : "pointer",
-                    marginTop: "4px",
-                  }}
-                >
-                  {isGeneratingReport ? "Generating your report..." : "Get my report →"}
-                </button>
-              </div>
-            </div>
-          </div>
+          <EmailStage
+            name={name}
+            setName={setName}
+            email={email}
+            setEmail={setEmail}
+            company={company}
+            setCompany={setCompany}
+            onSubmit={handleEmailSubmit}
+            error={emailError}
+          />
         )}
-
-        {/* REPORT */}
+        {stage === "building" && (
+          <BuildTheater
+            stages={buildStages}
+            businessName={assessment.businessName}
+          />
+        )}
         {stage === "report" && report && (
-          <div className="max-w-3xl mx-auto px-5" style={{ paddingTop: "40px", paddingBottom: "80px" }}>
-            {/* Report content */}
-            <div id="report-content">
-              {/* Header */}
-              <div style={{ marginBottom: "40px" }}>
-                <div style={{ fontSize: "10px", fontWeight: 600, letterSpacing: "0.15em", textTransform: "uppercase", color: "#06b6d4", marginBottom: "8px" }}>Mini AI Audit</div>
-                <h1 style={{ fontSize: "28px", fontWeight: 700, letterSpacing: "-0.02em", color: "#ffffff", margin: "0 0 4px 0" }}>EMVY Mini AI Audit Report</h1>
-                <p style={{ fontSize: "11px", color: "#6b6b70", margin: 0 }}>Prepared for {name} · {email}</p>
-                <div style={{ width: "40px", height: "3px", background: "#06b6d4", marginTop: "16px" }} />
-              </div>
-
-              {/* Score */}
-              <div style={{ background: "#141414", borderRadius: "12px", padding: "28px", marginBottom: "32px", textAlign: "center" }}>
-                <div style={{ fontSize: "10px", fontWeight: 600, letterSpacing: "0.1em", textTransform: "uppercase", color: "#6b6b70", marginBottom: "12px" }}>Mini AI Audit Score</div>
-                <div style={{ fontSize: "52px", fontWeight: 800, letterSpacing: "-0.03em", lineHeight: 1, color: report.score >= 70 ? "#22c55e" : report.score >= 40 ? "#06b6d4" : "#ef4444" }}>
-                  {report.score}<span style={{ fontSize: "20px", fontWeight: 500, color: "#6b6b70" }}>/100</span>
-                </div>
-                <p style={{ fontSize: "13px", color: "#a1a1aa", margin: "10px 0 0 0" }}>{report.scoreLabel}</p>
-              </div>
-
-              {/* Business snapshot */}
-              <div style={{ marginBottom: "32px" }}>
-                <div style={{ fontSize: "10px", fontWeight: 600, letterSpacing: "0.1em", textTransform: "uppercase", color: "#6b6b70", marginBottom: "12px" }}>Business Snapshot</div>
-                <div style={{ background: "#141414", borderRadius: "12px", padding: "20px" }}>
-                  <table style={{ width: "100%", borderCollapse: "collapse" }}>
-                    <tbody>
-                      <tr>
-                        <td style={{ padding: "10px 0", borderBottom: "1px solid #262626", fontSize: "13px", color: "#6b6b70" }}>Business</td>
-                        <td style={{ padding: "10px 0", borderBottom: "1px solid #262626", fontSize: "13px", color: "#ececec", fontWeight: 500 }}>{report.businessName || "—"}</td>
-                      </tr>
-                      <tr>
-                        <td style={{ padding: "10px 0", borderBottom: "1px solid #262626", fontSize: "13px", color: "#6b6b70" }}>Industry</td>
-                        <td style={{ padding: "10px 0", borderBottom: "1px solid #262626", fontSize: "13px", color: "#ececec", fontWeight: 500 }}>{report.industry || "—"}</td>
-                      </tr>
-                      <tr>
-                        <td style={{ padding: "10px 0", borderBottom: "1px solid #262626", fontSize: "13px", color: "#6b6b70" }}>AI Tools</td>
-                        <td style={{ padding: "10px 0", borderBottom: "1px solid #262626", fontSize: "13px", color: "#ececec", fontWeight: 500 }}>{assessment.aiTools || "None yet"}</td>
-                      </tr>
-                      <tr>
-                        <td style={{ padding: "10px 0", borderBottom: "1px solid #262626", fontSize: "13px", color: "#6b6b70" }}>Goal (6 months)</td>
-                        <td style={{ padding: "10px 0", borderBottom: "1px solid #262626", fontSize: "13px", color: "#ececec", fontWeight: 500 }}>{assessment.goal || "—"}</td>
-                      </tr>
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-
-              {/* Top findings */}
-              <div style={{ marginBottom: "32px" }}>
-                <div style={{ fontSize: "10px", fontWeight: 600, letterSpacing: "0.1em", textTransform: "uppercase", color: "#6b6b70", marginBottom: "12px" }}>Top findings</div>
-                <ol style={{ margin: 0, padding: "0 0 0 20px" }}>
-                  {report.topFindings.map((f, i) => (
-                    <li key={i} style={{ fontSize: "14px", color: "#d4d4d8", lineHeight: 1.6, marginBottom: "8px" }}>{f}</li>
-                  ))}
-                </ol>
-              </div>
-
-              {/* Recommendations */}
-              <div style={{ marginBottom: "32px" }}>
-                <div style={{ fontSize: "10px", fontWeight: 600, letterSpacing: "0.1em", textTransform: "uppercase", color: "#6b6b70", marginBottom: "12px" }}>Easy wins to make this week</div>
-                <ol style={{ margin: 0, padding: "0 0 0 20px" }}>
-                  {report.recommendations.map((r, i) => (
-                    <li key={i} style={{ fontSize: "14px", color: "#d4d4d8", lineHeight: 1.6, marginBottom: "8px" }}>{r}</li>
-                  ))}
-                </ol>
-              </div>
-
-              {/* Priority automations */}
-              <div style={{ marginBottom: "32px" }}>
-                <div style={{ fontSize: "10px", fontWeight: 600, letterSpacing: "0.1em", textTransform: "uppercase", color: "#6b6b70", marginBottom: "12px" }}>Workflows to automate first</div>
-                {report.priorityAutomations.map((a, i) => (
-                  <div key={i} style={{ background: "#141414", borderLeft: "3px solid #06b6d4", padding: "12px 16px", marginBottom: "8px", borderRadius: "0 8px 8px 0" }}>
-                    <div style={{ fontSize: "10px", fontWeight: 600, letterSpacing: "0.1em", textTransform: "uppercase", color: "#06b6d4", marginBottom: "4px" }}>Priority {String(i + 1).padStart(2, "0")}</div>
-                    <div style={{ fontSize: "13px", color: "#d4d4d8", lineHeight: 1.5 }}>{a}</div>
-                  </div>
-                ))}
-              </div>
-
-              {/* CTA */}
-              <div style={{ background: "#06b6d4", borderRadius: "12px", padding: "24px", textAlign: "center" }}>
-                <h2 style={{ fontSize: "18px", fontWeight: 700, color: "#0a0a0b", margin: "0 0 8px 0" }}>Ready for the Full Picture?</h2>
-                <p style={{ fontSize: "13px", color: "rgba(0,0,0,0.7)", margin: "0 0 16px 0" }}>
-                  This report shows your quick wins. A full audit digs deeper — workflows, bottlenecks, and a complete AI roadmap tailored to your business.
-                </p>
-                <a href="mailto:hello@emvyai.com" style={{ display: "inline-block", fontWeight: 700, background: "#0a0a0b", color: "#06b6d4", padding: "12px 28px", borderRadius: "9999px", textDecoration: "none", fontSize: "14px" }}>
-                  Book a Full Audit →
-                </a>
-              </div>
-            </div>
-
-            {/* PDF button */}
-            <div style={{ display: "flex", justifyContent: "center", marginTop: "32px" }}>
-              <button
-                onClick={generatePdf}
-                disabled={isGeneratingPdf}
-                style={{
-                  background: "transparent",
-                  color: "#06b6d4",
-                  fontWeight: 600,
-                  fontSize: "14px",
-                  padding: "11px 24px",
-                  borderRadius: "9999px",
-                  border: "1px solid #06b6d4",
-                  cursor: isGeneratingPdf ? "not-allowed" : "pointer",
-                }}
-              >
-                {isGeneratingPdf ? "Generating PDF..." : "Download PDF report"}
-              </button>
-            </div>
-          </div>
+          <ReportStage
+            report={report}
+            name={name}
+            email={email}
+            scoreDisplay={scoreDisplay}
+            isGeneratingPdf={isGeneratingPdf}
+            onDownload={generatePdf}
+          />
         )}
       </main>
+    </div>
+  );
+}
 
-      {/* Input bar — fixed at bottom during chat */}
-      {stage === "chat" && (
-        <div style={{ position: "fixed", bottom: 0, left: 0, right: 0, background: "rgba(10,10,11,0.95)", backdropFilter: "blur(16px)", borderTop: "1px solid rgba(6,182,212,0.12)", padding: "0" }}>
-          {/* Security footer */}
-          <div style={{ display: "flex", justifyContent: "space-between", padding: "6px 20px", borderBottom: "1px solid rgba(255,255,255,0.04)", fontSize: "10px", color: "#52525b", fontFamily: "monospace", letterSpacing: "0.04em" }}>
-            <span style={{ color: "#06b6d4" }}>DATA SECURE // END-TO-END ENCRYPTED</span>
-            <span>AUTO-SAVING AUDIT STATE</span>
-          </div>
-          {/* Input area */}
-          <div className="max-w-3xl mx-auto px-5 py-4">
-            <div style={{ display: "flex", gap: "10px", alignItems: "center" }}>
-              <textarea
-                ref={inputRef}
-                value={input}
-                onChange={(e) => setInput(e.target.value)}
-                onKeyDown={handleKeyDown}
-                placeholder="Type your answer..."
-                rows={1}
-                style={{
-                  flex: 1,
-                  background: "rgba(255,255,255,0.04)",
-                  border: "1px solid rgba(6,182,212,0.15)",
-                  borderRadius: "10px",
-                  padding: "13px 16px",
-                  color: "#e4e4e7",
-                  fontSize: "14px",
-                  outline: "none",
-                  resize: "none",
-                  fontFamily: "inherit",
-                  lineHeight: 1.5,
-                  maxHeight: "120px",
-                  overflowY: "auto",
-                  boxShadow: "0 0 0 1px rgba(6,182,212,0.08)",
-                }}
-              />
-              <button
-                onClick={handleSend}
-                disabled={!input.trim() || isBotTyping}
-                style={{
-                  background: input.trim() && !isBotTyping ? "#06b6d4" : "rgba(255,255,255,0.06)",
-                  color: input.trim() && !isBotTyping ? "#0a0a0b" : "#52525b",
-                  fontWeight: 700,
-                  fontSize: "14px",
-                  padding: "12px 18px",
-                  borderRadius: "10px",
-                  border: "none",
-                  cursor: input.trim() && !isBotTyping ? "pointer" : "not-allowed",
-                  transition: "all 150ms ease",
-                  display: "flex",
-                  alignItems: "center",
-                  gap: "6px",
-                  letterSpacing: "0.02em",
-                }}
+/* ─── Welcome / Hero ─────────────────────────────────────────────────────────── */
+
+function WelcomeScreen({ onStart }: { onStart: () => void }) {
+  return (
+    <div
+      className="mx-auto"
+      style={{
+        maxWidth: 1180,
+        padding: "clamp(48px, 8vh, 96px) 24px 80px",
+        display: "grid",
+        gridTemplateColumns: "minmax(0, 1.1fr) minmax(0, 0.9fr)",
+        gap: "clamp(32px, 5vw, 72px)",
+        alignItems: "center",
+      }}
+    >
+      <style>{`
+        @media (max-width: 880px) {
+          .hero-grid { grid-template-columns: 1fr !important; }
+          .hero-preview { display: none !important; }
+        }
+        @media (max-width: 640px) {
+          .report-score-row { grid-template-columns: 1fr !important; text-align: left !important; }
+          .report-score-row > div:first-child { align-items: flex-start !important; }
+        }
+      `}</style>
+
+      <div className="hero-grid" style={{ display: "contents" }} />
+
+      <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+        <div
+          className="label-eyebrow-accent animate-fade-down"
+          style={{ animationDelay: "60ms", opacity: 0, animationFillMode: "forwards" }}
+        >
+          Free · 5 minutes · No commitment
+        </div>
+
+        <h1
+          style={{
+            fontSize: "clamp(40px, 6vw, 64px)",
+            fontWeight: 600,
+            letterSpacing: "-0.035em",
+            lineHeight: 1.02,
+            margin: 0,
+            opacity: 0,
+            animation: "fadeUp var(--motion-slow) var(--ease-out) 120ms forwards",
+          }}
+        >
+          A 30-day AI
+          <br />
+          roadmap for your
+          <br />
+          <span style={{ color: "var(--accent)" }}>business</span>
+          <span style={{ color: "var(--text-muted)" }}> — in 5 minutes.</span>
+        </h1>
+
+        <p
+          style={{
+            fontSize: 17,
+            lineHeight: 1.55,
+            color: "var(--text-secondary)",
+            maxWidth: 480,
+            margin: 0,
+            opacity: 0,
+            animation: "fadeUp var(--motion-slow) var(--ease-out) 220ms forwards",
+          }}
+        >
+          Answer 13 short questions about how your business runs day to day.
+          Walk away with a personalised 30/60/90 day plan you can ship this week — built by EMVY, ready to action.
+        </p>
+
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 16,
+            marginTop: 8,
+            opacity: 0,
+            animation: "fadeUp var(--motion-slow) var(--ease-out) 320ms forwards",
+          }}
+        >
+          <button onClick={onStart} className="btn-primary" style={{ padding: "14px 26px", fontSize: 15 }}>
+            Start my audit
+            <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
+              <path d="M2 7H12M8 3L12 7L8 11" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+          </button>
+          <span className="label-meta">No card · No spam · No follow-up unless you ask</span>
+        </div>
+      </div>
+
+      <div className="hero-preview" style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+        <PreviewCard
+          eyebrow="Week 01"
+          title="Quick wins"
+          items={["Audit recurring copy-paste work", "Pick the 1 to automate first", "Set up a shared roadmap doc"]}
+          delayMs={420}
+        />
+        <PreviewCard
+          eyebrow="Weeks 02–04"
+          title="First automation"
+          items={["Ship the week 1 target end-to-end", "Automate invoice or follow-up", "Brief the team on AI policy"]}
+          delayMs={540}
+          offset
+        />
+        <PreviewCard
+          eyebrow="Months 02–03"
+          title="Compound the wins"
+          items={["Layer AI into lead pipeline", "Weekly AI review cadence", "Quarterly roadmap refresh"]}
+          delayMs={660}
+        />
+      </div>
+    </div>
+  );
+}
+
+function PreviewCard({
+  eyebrow,
+  title,
+  items,
+  delayMs,
+  offset = false,
+}: {
+  eyebrow: string;
+  title: string;
+  items: string[];
+  delayMs: number;
+  offset?: boolean;
+}) {
+  return (
+    <div
+      className="card-elevated"
+      style={{
+        padding: 18,
+        transform: `translateX(${offset ? 24 : 0}px)`,
+        opacity: 0,
+        animation: `fadeUp var(--motion-slow) var(--ease-out) ${delayMs}ms forwards`,
+        position: "relative",
+        overflow: "hidden",
+      }}
+    >
+      <div
+        style={{
+          position: "absolute",
+          inset: 0,
+          background:
+            "linear-gradient(135deg, transparent 0%, rgba(86, 217, 255, 0.04) 100%)",
+          pointerEvents: "none",
+        }}
+      />
+      <div style={{ position: "relative" }}>
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            marginBottom: 8,
+          }}
+        >
+          <span className="label-eyebrow-accent">{eyebrow}</span>
+          <span className="label-meta">{items.length} actions</span>
+        </div>
+        <div
+          style={{
+            fontSize: 17,
+            fontWeight: 600,
+            letterSpacing: "-0.015em",
+            marginBottom: 12,
+          }}
+        >
+          {title}
+        </div>
+        <ol
+          style={{
+            listStyle: "none",
+            padding: 0,
+            margin: 0,
+            display: "flex",
+            flexDirection: "column",
+            gap: 6,
+          }}
+        >
+          {items.map((it, i) => (
+            <li
+              key={i}
+              style={{
+                display: "flex",
+                gap: 10,
+                fontSize: 13.5,
+                color: "var(--text-secondary)",
+                lineHeight: 1.5,
+                alignItems: "flex-start",
+              }}
+            >
+              <span
+                className="label-meta"
+                style={{ color: "var(--text-muted)", minWidth: 18, paddingTop: 1 }}
               >
-                {input.trim() && !isBotTyping ? (
-                  <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M3 8h10M9 4l4 4-4 4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
-                ) : null}
-                Send
-              </button>
-            </div>
+                {String(i + 1).padStart(2, "0")}
+              </span>
+              <span style={{ filter: i >= 2 ? "blur(3px)" : "none" }}>{it}</span>
+            </li>
+          ))}
+        </ol>
+      </div>
+    </div>
+  );
+}
+
+/* ─── Chat Stage ─────────────────────────────────────────────────────────────── */
+
+function ChatStage({
+  messages,
+  input,
+  setInput,
+  isBotTyping,
+  onSend,
+  onKeyDown,
+  inputRef,
+  assessment,
+  onGoToEmail,
+  chatEndRef,
+}: {
+  messages: Message[];
+  input: string;
+  setInput: (v: string) => void;
+  isBotTyping: boolean;
+  onSend: () => void;
+  onKeyDown: (e: React.KeyboardEvent<HTMLTextAreaElement>) => void;
+  inputRef: React.RefObject<HTMLTextAreaElement | null>;
+  assessment: Assessment;
+  onGoToEmail: () => void;
+  chatEndRef: React.RefObject<HTMLDivElement | null>;
+}) {
+  const questionCount = Math.min(13, Math.max(1, Math.ceil(assessment.categoriesCovered.length * 1.3) + 1));
+  return (
+    <div
+      className="mx-auto"
+      style={{
+        maxWidth: 760,
+        padding: "clamp(24px, 4vw, 48px) 24px 200px",
+      }}
+    >
+      <div style={{ display: "flex", flexDirection: "column", gap: 28 }}>
+        {messages.map((msg, idx) => (
+          <ChatBubble
+            key={idx}
+            msg={msg}
+            isBotTyping={isBotTyping}
+            isLast={idx === messages.length - 1}
+          />
+        ))}
+
+        {assessment.readyForEmail && !isBotTyping && (
+          <div style={{ display: "flex", justifyContent: "flex-start" }} className="animate-fade-up">
+            <button onClick={onGoToEmail} className="btn-primary">
+              Get my roadmap
+              <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
+                <path d="M2 7H12M8 3L12 7L8 11" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+            </button>
+          </div>
+        )}
+
+        <div ref={chatEndRef} />
+      </div>
+
+      {/* Input bar — fixed at bottom */}
+      <div
+        style={{
+          position: "fixed",
+          bottom: 0,
+          left: 0,
+          right: 0,
+          background: "rgba(10, 17, 24, 0.92)",
+          backdropFilter: "blur(16px)",
+          WebkitBackdropFilter: "blur(16px)",
+          borderTop: "1px solid var(--border-subtle)",
+          padding: "12px 0 16px",
+        }}
+      >
+        <div
+          className="mx-auto"
+          style={{
+            maxWidth: 760,
+            padding: "0 24px",
+            display: "flex",
+            flexDirection: "column",
+            gap: 8,
+          }}
+        >
+          <div
+            style={{
+              display: "flex",
+              gap: 10,
+              alignItems: "center",
+            }}
+          >
+            <textarea
+              ref={inputRef}
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyDown={onKeyDown}
+              placeholder="Type your answer..."
+              rows={1}
+              className="input-field"
+              style={{
+                flex: 1,
+                resize: "none",
+                lineHeight: 1.5,
+                maxHeight: 120,
+                overflowY: "auto",
+                fontSize: 15,
+              }}
+            />
+            <button
+              onClick={onSend}
+              disabled={!input.trim() || isBotTyping}
+              className="btn-primary"
+              style={{
+                padding: "12px 18px",
+                opacity: !input.trim() || isBotTyping ? 0.4 : 1,
+                cursor: !input.trim() || isBotTyping ? "not-allowed" : "pointer",
+                transform: "none",
+                boxShadow: "none",
+              }}
+            >
+              Send
+            </button>
+          </div>
+          <div
+            className="label-meta"
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              padding: "0 4px",
+            }}
+          >
+            <span>Your answers stay private</span>
+            <span style={{ color: "var(--accent)" }}>
+              Question {Math.min(13, questionCount)} of 13
+            </span>
           </div>
         </div>
+      </div>
+    </div>
+  );
+}
+
+function ChatBubble({ msg, isBotTyping, isLast }: { msg: Message; isBotTyping: boolean; isLast: boolean }) {
+  const isUser = msg.role === "user";
+  return (
+    <div
+      style={{
+        display: "flex",
+        flexDirection: "column",
+        alignItems: isUser ? "flex-end" : "flex-start",
+        gap: 6,
+      }}
+      className="animate-fade-up"
+    >
+      {!isUser && (
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 8,
+          }}
+        >
+          <EmvyLogo size={14} color="var(--accent)" />
+          <span className="label-eyebrow-accent" style={{ fontSize: 10 }}>EMVY</span>
+        </div>
       )}
+      <div className={isUser ? "message-user" : "message-bot"}>
+        {msg.content ? (
+          isUser ? (
+            msg.content
+          ) : (
+            <ReactMarkdown
+              remarkPlugins={[remarkGfm]}
+              components={{
+                p: (p) => <p style={{ margin: 0 }} {...p} />,
+                a: (a) => <a style={{ color: "var(--accent)" }} {...a} />,
+              }}
+            >
+              {msg.content}
+            </ReactMarkdown>
+          )
+        ) : isBotTyping && isLast ? (
+          <span style={{ display: "inline-flex", alignItems: "center", gap: 8, color: "var(--accent)" }}>
+            <span
+              style={{
+                display: "inline-block",
+                width: 6,
+                height: 14,
+                background: "var(--accent)",
+                borderRadius: 1,
+                animation: "blink 1s step-end infinite",
+              }}
+            />
+            <span className="label-meta" style={{ color: "var(--text-muted)" }}>thinking</span>
+          </span>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+/* ─── Email Stage ────────────────────────────────────────────────────────────── */
+
+function EmailStage({
+  name,
+  setName,
+  email,
+  setEmail,
+  company,
+  setCompany,
+  onSubmit,
+  error,
+}: {
+  name: string;
+  setName: (v: string) => void;
+  email: string;
+  setEmail: (v: string) => void;
+  company: string;
+  setCompany: (v: string) => void;
+  onSubmit: () => void;
+  error: string;
+}) {
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  function handleSubmit() {
+    if (isSubmitting) return;
+    setIsSubmitting(true);
+    onSubmit();
+  }
+
+  return (
+    <div
+      className="mx-auto"
+      style={{
+        maxWidth: 520,
+        padding: "clamp(48px, 10vh, 96px) 24px 80px",
+        display: "flex",
+        flexDirection: "column",
+        gap: 24,
+      }}
+    >
+      <div className="stagger-children">
+        <div className="label-eyebrow-accent">Your roadmap</div>
+        <h1
+          style={{
+            fontSize: "clamp(32px, 4.5vw, 44px)",
+            fontWeight: 600,
+            letterSpacing: "-0.03em",
+            lineHeight: 1.05,
+            margin: 0,
+            marginTop: 8,
+          }}
+        >
+          Where should we send it?
+        </h1>
+        <p
+          style={{
+            color: "var(--text-secondary)",
+            fontSize: 16,
+            lineHeight: 1.55,
+            margin: "12px 0 0 0",
+            maxWidth: 440,
+          }}
+        >
+          Drop your details and we&apos;ll generate your personalised 30/60/90 day AI roadmap. Usually ready in 5–8 seconds.
+        </p>
+
+        <div
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            gap: 12,
+            marginTop: 24,
+            maxWidth: 420,
+          }}
+        >
+          <input
+            type="text"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder="Full name"
+            className="input-field"
+            autoComplete="name"
+          />
+          <input
+            type="email"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            placeholder="Email address"
+            className="input-field"
+            autoComplete="email"
+          />
+          <input
+            type="text"
+            value={company}
+            onChange={(e) => setCompany(e.target.value)}
+            placeholder="Company name (optional)"
+            className="input-field"
+            autoComplete="organization"
+          />
+          {error && (
+            <p style={{ color: "var(--error)", fontSize: 13, margin: 0 }}>{error}</p>
+          )}
+          <button
+            onClick={handleSubmit}
+            disabled={isSubmitting}
+            className="btn-primary"
+            style={{ marginTop: 8, alignSelf: "flex-start", padding: "13px 24px" }}
+          >
+            {isSubmitting ? "Generating your roadmap…" : "Get my roadmap"}
+            <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
+              <path d="M2 7H12M8 3L12 7L8 11" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ─── Report Stage ───────────────────────────────────────────────────────────── */
+
+function ReportStage({
+  report,
+  name,
+  email,
+  scoreDisplay,
+  isGeneratingPdf,
+  onDownload,
+}: {
+  report: ReportData;
+  name: string;
+  email: string;
+  scoreDisplay: number;
+  isGeneratingPdf: boolean;
+  onDownload: () => void;
+}) {
+  const scoreColor = report.score >= 70 ? "var(--success)" : report.score >= 40 ? "var(--accent)" : "var(--error)";
+  return (
+    <div
+      className="mx-auto"
+      style={{
+        maxWidth: 820,
+        padding: "clamp(40px, 6vw, 72px) 24px 96px",
+      }}
+    >
+      {/* Cover */}
+      <header
+        className="animate-fade-up"
+        style={{
+          display: "flex",
+          flexDirection: "column",
+          gap: 12,
+          marginBottom: 40,
+        }}
+      >
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <EmvyLogo size={20} color="var(--accent)" />
+          <span className="label-eyebrow-accent">EMVY · AI Audit</span>
+        </div>
+        <h1
+          style={{
+            fontSize: "clamp(28px, 4vw, 40px)",
+            fontWeight: 600,
+            letterSpacing: "-0.03em",
+            lineHeight: 1.05,
+            margin: 0,
+          }}
+        >
+          {report.businessName} <span style={{ color: "var(--text-muted)" }}>— 30/60/90 roadmap</span>
+        </h1>
+        <p className="label-meta">
+          Prepared for {name} · {email}
+        </p>
+        <div className="divider-accent" style={{ marginTop: 8 }} />
+      </header>
+
+      {/* Score + summary card */}
+      <section
+        className="card-elevated report-score-row"
+        style={{
+          display: "grid",
+          gridTemplateColumns: "auto 1fr",
+          gap: 32,
+          alignItems: "center",
+          marginBottom: 32,
+          opacity: 0,
+          animation: "fadeUp var(--motion-slow) var(--ease-out) 60ms forwards",
+        }}
+      >
+        <div
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            alignItems: "center",
+            minWidth: 140,
+          }}
+        >
+          <div
+            className="label-eyebrow-accent"
+            style={{ marginBottom: 6 }}
+          >
+            AI Readiness
+          </div>
+          <div
+            style={{
+              fontFamily: "var(--font-display), 'Space Grotesk', system-ui, sans-serif",
+              fontSize: 64,
+              fontWeight: 700,
+              letterSpacing: "-0.04em",
+              lineHeight: 1,
+              color: scoreColor,
+              fontVariantNumeric: "tabular-nums",
+            }}
+          >
+            {scoreDisplay}
+            <span
+              style={{
+                fontSize: 22,
+                color: "var(--text-muted)",
+                fontWeight: 500,
+                marginLeft: 2,
+              }}
+            >
+              /100
+            </span>
+          </div>
+          <div
+            style={{
+              fontSize: 12,
+              color: "var(--text-secondary)",
+              marginTop: 6,
+              fontWeight: 500,
+            }}
+          >
+            {report.scoreLabel}
+          </div>
+        </div>
+        <div>
+          <p
+            style={{
+              fontSize: 16,
+              lineHeight: 1.6,
+              color: "var(--foreground)",
+              margin: 0,
+              marginBottom: 12,
+            }}
+          >
+            {report.summary}
+          </p>
+          <p
+            className="label-meta"
+            style={{ color: "var(--text-muted)" }}
+          >
+            {report.scoreBlurb}
+          </p>
+        </div>
+      </section>
+
+      {/* Roadmap sections */}
+      <div style={{ display: "flex", flexDirection: "column", gap: 16, marginBottom: 32 }}>
+        {report.week1.length > 0 && (
+          <RoadmapSection
+            eyebrow="Week 01"
+            title="What to do this week"
+            actions={report.week1}
+            index={1}
+          />
+        )}
+        {report.weeks24.length > 0 && (
+          <RoadmapSection
+            eyebrow="Weeks 02–04"
+            title="Your first 30 days"
+            actions={report.weeks24}
+            index={2}
+          />
+        )}
+        {report.months23.length > 0 && (
+          <RoadmapSection
+            eyebrow="Months 02–03"
+            title="The compounding horizon"
+            actions={report.months23}
+            index={3}
+          />
+        )}
+      </div>
+
+      {/* CTA block */}
+      <section
+        className="card-accent"
+        style={{
+          padding: "clamp(24px, 4vw, 36px)",
+          textAlign: "center",
+          opacity: 0,
+          animation: "fadeUp var(--motion-slow) var(--ease-out) 500ms forwards",
+        }}
+      >
+        <h2
+          style={{
+            fontSize: "clamp(22px, 3vw, 30px)",
+            fontWeight: 600,
+            letterSpacing: "-0.025em",
+            margin: 0,
+            marginBottom: 10,
+          }}
+        >
+          Ready for the full picture?
+        </h2>
+        <p
+          style={{
+            color: "var(--text-secondary)",
+            fontSize: 15,
+            lineHeight: 1.55,
+            margin: "0 auto 20px",
+            maxWidth: 480,
+          }}
+        >
+          {report.nextStep}
+        </p>
+        <a
+          href={BOOKING_URL}
+          className="btn-primary"
+          style={{ textDecoration: "none" }}
+        >
+          Book a 30-min discovery call
+          <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
+            <path d="M2 7H12M8 3L12 7L8 11" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+        </a>
+        <p
+          className="label-meta"
+          style={{ marginTop: 16, color: "var(--text-muted)" }}
+        >
+          No pitch deck. No pressure. Just a focused 30 minutes.
+        </p>
+      </section>
+
+      {/* PDF download */}
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "center",
+          marginTop: 32,
+          opacity: 0,
+          animation: "fadeUp var(--motion-slow) var(--ease-out) 620ms forwards",
+        }}
+      >
+        <button
+          onClick={onDownload}
+          disabled={isGeneratingPdf}
+          className="btn-outline"
+        >
+          {isGeneratingPdf ? "Generating PDF…" : "Download as PDF"}
+        </button>
+      </div>
     </div>
   );
 }

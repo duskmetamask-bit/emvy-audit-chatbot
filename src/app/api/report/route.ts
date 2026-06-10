@@ -1,9 +1,14 @@
-// /api/report — generates the report content (JSON for the frontend)
-// using M2.7 and the lead's running assessment.
+// /api/report — generates the personalised 30/60/90 day AI roadmap as a
+// Server-Sent Events stream. The frontend listens for `status` events
+// (build theater) and a final `data` event with the parsed ReportData JSON.
+//
+// Why SSE: the audit report is the climax of the flow. Streaming lets us
+// show "Building your roadmap..." stages in real-time, then fade the
+// final report in as the data lands. Beats a static spinner.
 
 import { NextRequest } from "next/server";
-import { REPORT_SYSTEM_PROMPT, Assessment, emptyAssessment } from "@/lib/agent";
-import { chatCompletion } from "@/lib/llm";
+import { REPORT_SYSTEM_PROMPT, STAGE_PLAN, Assessment, emptyAssessment } from "@/lib/agent";
+import { chatCompletionStream, ChatMessage } from "@/lib/llm";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -15,6 +20,19 @@ interface ReportRequestBody {
   company?: string;
 }
 
+interface RoadmapData {
+  score: number;
+  scoreLabel: string;
+  scoreBlurb: string;
+  businessName: string;
+  industry: string;
+  summary: string;
+  week1: string[];
+  weeks24: string[];
+  months23: string[];
+  nextStep: string;
+}
+
 function stripCodeFences(s: string): string {
   let out = s.trim();
   if (out.startsWith("```")) {
@@ -23,7 +41,7 @@ function stripCodeFences(s: string): string {
   return out;
 }
 
-function deriveFallbackReport(assessment: Assessment, lead: ReportRequestBody) {
+function deriveFallbackRoadmap(assessment: Assessment, lead: ReportRequestBody): RoadmapData {
   const scores = Object.values(assessment.scores || {});
   const avg = scores.length ? scores.reduce((a, b) => a + b, 0) / scores.length : 3;
   const score = Math.round(avg * 20);
@@ -40,27 +58,55 @@ function deriveFallbackReport(assessment: Assessment, lead: ReportRequestBody) {
     businessName: assessment.businessName || lead.company || lead.name || "Your business",
     industry: assessment.industry || "your sector",
     summary:
-      "Based on the audit, there are concrete places to remove manual work and tighten how the business runs day to day. The findings below are specific to what was discussed in the chat.",
-    topFindings: assessment.findings.length
-      ? assessment.findings.slice(0, 5).map((f) => f.text)
-      : [
-          "Manual workflows are taking time that could be redirected to growth.",
-          "Customer follow-up is inconsistent across the team.",
-          "Reporting and visibility into the business is limited.",
-        ],
-    recommendations: [
-      "Pick the most painful manual task and automate it end-to-end first — quick win, clear ROI.",
-      "Set up a single source of truth for customer communication and job status.",
-      "Schedule weekly auto-generated reporting so the team sees numbers without manual pulls.",
+      "Based on the audit, the next 90 days can be shaped around three moves: remove the most painful manual work, ship one meaningful automation, and build a habit of AI-assisted decisions.",
+    week1: [
+      "List every recurring task that takes more than 30 minutes a week and rank them by pain.",
+      "Pick the single most painful one — that's your week 1 target.",
+      "Set up a shared Notion or Google Doc so the team can see the roadmap.",
     ],
-    priorityAutomations: [
-      "Highest-pain manual workflow (often invoicing or lead response) — biggest time leak.",
-      "Customer follow-up sequence after a job is done — drives repeat business.",
-      "Reporting dashboard pulling from existing tools — gives visibility in one view.",
+    weeks24: [
+      "Ship the week 1 automation end-to-end. Measure the time it frees up.",
+      "Set up automated invoice or follow-up reminders if cashflow or lead response is leaking.",
+      "Brief the team on a lightweight AI policy — what's allowed, what's reviewed.",
     ],
-    nextStep:
-      "Book a 30-minute discovery call and we'll map out a custom implementation plan for your business.",
+    months23: [
+      "Layer AI into the next-priority workflow (lead qualification, reporting, or scheduling).",
+      "Move to a weekly AI review cadence — what's working, what to retire, what to try next.",
+      "Plan a quarterly audit checkpoint to keep the roadmap honest as the business shifts.",
+    ],
+    nextStep: "Book a 30-minute discovery call and we'll map a custom 30/60/90 plan for your business.",
   };
+}
+
+function parseRoadmap(raw: string): RoadmapData | null {
+  const cleaned = stripCodeFences(raw);
+  const first = cleaned.indexOf("{");
+  const last = cleaned.lastIndexOf("}");
+  if (first === -1 || last === -1) return null;
+  try {
+    const parsed = JSON.parse(cleaned.slice(first, last + 1));
+    if (!parsed || typeof parsed !== "object" || parsed.score === undefined) return null;
+    const asArray = (v: unknown): string[] =>
+      Array.isArray(v) ? v.filter((x): x is string => typeof x === "string" && x.trim().length > 0) : [];
+    return {
+      score: Number(parsed.score) || 0,
+      scoreLabel: typeof parsed.scoreLabel === "string" ? parsed.scoreLabel : "Moderate readiness",
+      scoreBlurb: typeof parsed.scoreBlurb === "string" ? parsed.scoreBlurb : "",
+      businessName: typeof parsed.businessName === "string" ? parsed.businessName : "",
+      industry: typeof parsed.industry === "string" ? parsed.industry : "your sector",
+      summary: typeof parsed.summary === "string" ? parsed.summary : "",
+      week1: asArray(parsed.week1),
+      weeks24: asArray(parsed.weeks24),
+      months23: asArray(parsed.months23),
+      nextStep: typeof parsed.nextStep === "string" ? parsed.nextStep : "",
+    };
+  } catch {
+    return null;
+  }
+}
+
+function sseEvent(event: string, data: unknown): string {
+  return `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
 }
 
 export async function POST(req: NextRequest) {
@@ -86,12 +132,12 @@ export async function POST(req: NextRequest) {
     });
   }
 
-  const messages = [
+  const messages: ChatMessage[] = [
     { role: "system" as const, content: REPORT_SYSTEM_PROMPT },
     {
       role: "user" as const,
       content:
-        "Generate the report for this lead. Lead details: " +
+        "Generate the roadmap for this lead. Lead details: " +
         JSON.stringify({ name: body.name, email: body.email, company: body.company || null }) +
         "\n\nAssessment (from the chat): " +
         JSON.stringify(assessment, null, 2) +
@@ -99,25 +145,77 @@ export async function POST(req: NextRequest) {
     },
   ];
 
-  try {
-    const res = await chatCompletion({ messages, temperature: 0.6, maxTokens: 1800 });
-    const raw = res.choices?.[0]?.message?.content || "";
-    const cleaned = stripCodeFences(raw);
-    const first = cleaned.indexOf("{");
-    const last = cleaned.lastIndexOf("}");
-    if (first !== -1 && last !== -1) {
-      try {
-        const parsed = JSON.parse(cleaned.slice(first, last + 1));
-        if (parsed && typeof parsed === "object" && parsed.score !== undefined) {
-          return Response.json(parsed);
+  const encoder = new TextEncoder();
+  const stream = new ReadableStream({
+    async start(controller) {
+      const send = (event: string, data: unknown) => {
+        try {
+          controller.enqueue(encoder.encode(sseEvent(event, data)));
+        } catch {
+          // controller closed by client — ignore
         }
-      } catch {
-        // fall through
+      };
+
+      // Schedule the build-theater status events. They fire on a timer
+      // so the user sees the stages progress in real-time while the LLM
+      // streams content. The last stage waits for the actual data.
+      const stageTimers: ReturnType<typeof setTimeout>[] = [];
+      for (let i = 0; i < STAGE_PLAN.length; i++) {
+        const stage = STAGE_PLAN[i];
+        const id = setTimeout(() => {
+          send("status", { stage: stage.key, label: stage.label });
+        }, stage.delayMs);
+        stageTimers.push(id);
       }
-    }
-    return Response.json(deriveFallbackReport(assessment, body));
-  } catch (err: any) {
-    console.error("[/api/report] LLM failed:", err?.message || err);
-    return Response.json(deriveFallbackReport(assessment, body));
-  }
+
+      let fullText = "";
+      let parsed: RoadmapData | null = null;
+      let llmError: string | null = null;
+
+      try {
+        for await (const delta of chatCompletionStream({
+          messages,
+          temperature: 0.6,
+          maxTokens: 2400,
+        })) {
+          fullText += delta;
+          // Send raw deltas too — the frontend can ignore them, but
+          // it's available if we want a typewriter effect later.
+          send("token", { delta });
+        }
+        parsed = parseRoadmap(fullText);
+      } catch (err: unknown) {
+        llmError = err instanceof Error ? err.message : "LLM stream failed";
+      }
+
+      // Cancel any pending stage timers — we're about to land.
+      for (const t of stageTimers) clearTimeout(t);
+
+      if (!parsed) {
+        // Either the LLM failed or the output wasn't valid JSON.
+        // Use the deterministic fallback. The user still gets a roadmap.
+        const fallback = deriveFallbackRoadmap(assessment, body);
+        send("status", { stage: "fallback", label: "Finalising your roadmap" });
+        send("data", { report: fallback, fallback: true, error: llmError });
+      } else {
+        send("status", { stage: "ready", label: "Ready" });
+        send("data", { report: parsed, fallback: false });
+      }
+
+      try {
+        controller.close();
+      } catch {
+        // already closed
+      }
+    },
+  });
+
+  return new Response(stream, {
+    headers: {
+      "Content-Type": "text/event-stream; charset=utf-8",
+      "Cache-Control": "no-cache, no-transform",
+      Connection: "keep-alive",
+      "X-Accel-Buffering": "no",
+    },
+  });
 }

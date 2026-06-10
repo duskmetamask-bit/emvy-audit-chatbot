@@ -3,7 +3,7 @@
 
 import { NextRequest } from "next/server";
 import { AUDIT_SYSTEM_PROMPT, emptyAssessment, Assessment } from "@/lib/agent";
-import { runAuditAgent, emptyAssessmentState, AssessmentState } from "@/lib/mini-agent";
+import { runAuditAgent, AssessmentState } from "@/lib/mini-agent";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -47,11 +47,11 @@ function stateToAssessment(state: AssessmentState): Assessment {
     manualTasks: state.manual_tasks,
     scores: state.scores,
     findings: (state.findings || []).map(f => ({
-      category: (f.category || "ops") as any,
+      category: (f.category || "ops") as Assessment["findings"][number]["category"],
       text: f.text,
       severity: f.severity,
     })),
-    categoriesCovered: state.categories_covered as any[],
+    categoriesCovered: state.categories_covered as Assessment["categoriesCovered"],
     messageCount: state.messageCount,
     readyForEmail: state.readyForEmail,
   };
@@ -87,11 +87,12 @@ export async function POST(req: NextRequest) {
         headers: { "Content-Type": "application/json" },
       }
     );
-  } catch (err: any) {
-    console.error("[/api/chat] Agent error:", err?.message || err);
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : "Unknown error";
+    console.error("[/api/chat] Agent error:", message);
     return new Response(
       JSON.stringify({
-        error: "Agent failed: " + (err?.message || "Unknown error"),
+        error: "Agent failed: " + message,
         message: "hmm, something broke on my end. try again?",
         assessment: body?.assessment || emptyAssessment(),
       }),
