@@ -39,3 +39,9 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# cloudflare wrangler auto-generated env types — kept at the repo root by
+# `wrangler types`, but the worker's own tsconfig is the source of truth
+# for worker-side types. Keeping this out of git avoids it leaking into
+# the Next.js type-check pass (it pins env vars to literal URLs).
+worker-configuration.d.ts
