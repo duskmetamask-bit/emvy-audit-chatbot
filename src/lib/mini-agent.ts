@@ -266,7 +266,7 @@ function normalizeReportData(
     week1: asArray(raw.week1),
     weeks24: asArray(raw.weeks24),
     months23: asArray(raw.months23),
-    nextStep: typeof raw.nextStep === "string" ? raw.nextStep : "Book a 30-minute discovery call and we'll map out a custom 30/60/90 plan for your business.",
+    nextStep: typeof raw.nextStep === "string" ? raw.nextStep : "Book a free 15-min discovery call and we'll map out a custom 30/60/90 plan for your business.",
   };
 }
 
@@ -305,7 +305,7 @@ function fallbackRoadmap(
       "Plan a quarterly audit checkpoint to keep the roadmap honest as the business shifts.",
     ],
     nextStep:
-      "Book a 30-minute discovery call and we'll map a custom 30/60/90 plan for your business.",
+      "Book a free 15-min discovery call and we'll map a custom 30/60/90 plan for your business.",
   };
 }
 

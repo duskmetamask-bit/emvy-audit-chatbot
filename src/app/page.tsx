@@ -8,7 +8,7 @@ import { BuildTheater, BuildStage } from "@/components/BuildTheater";
 import { RoadmapSection } from "@/components/RoadmapSection";
 import { callConvexMutation } from "@/lib/convex";
 
-const BOOKING_URL = "https://emvyai.com/book";
+const BOOKING_URL = "https://emvyai.com/services/discovery-call";
 
 const CATEGORY_LABELS: Record<string, string> = {
   lead_capture: "Lead capture",
@@ -442,13 +442,13 @@ export default function AuditChatbot() {
             style={{
               display: "flex",
               alignItems: "center",
-              gap: 12,
+              gap: 14,
               color: "inherit",
             }}
             aria-label="EMVY AI Mini Audit"
           >
-            <EmvyWordmark height={34} />
-            <span style={{ color: "var(--text-muted)", fontSize: 18, fontWeight: 400, lineHeight: 1 }}>· AI Mini Audit</span>
+            <EmvyWordmark height={48} />
+            <span style={{ color: "var(--text-muted)", fontSize: 22, fontWeight: 400, lineHeight: 1 }}>· AI Mini Audit</span>
           </div>
           {stage === "chat" && (
             <span className="label-meta" style={{ color: "var(--text-secondary)" }}>
@@ -1254,7 +1254,7 @@ function ReportStage({
           className="btn-primary"
           style={{ textDecoration: "none" }}
         >
-          Book a 30-min discovery call
+          Book a free 15-min discovery call
           <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
             <path d="M2 7H12M8 3L12 7L8 11" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
           </svg>
@@ -1263,7 +1263,7 @@ function ReportStage({
           className="label-meta"
           style={{ marginTop: 16, color: "var(--text-muted)" }}
         >
-          No pitch deck. No pressure. Just a focused 30 minutes.
+          No pitch deck. No pressure. Just a focused 15 minutes.
         </p>
       </section>
 

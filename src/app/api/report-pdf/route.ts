@@ -406,7 +406,7 @@ function ReportDocument({ report, lead }: { report: ReportData; lead: ReportRequ
         React.createElement(
           Text,
           { style: styles.ctaBody },
-          "A 30-minute discovery call with EMVY. We map the exact automations to your business, sequence them by ROI, and ship the first one inside two weeks."
+          "A free 15-min discovery call with EMVY. We map the exact automations to your business, sequence them by ROI, and ship the first one inside two weeks."
         ),
         React.createElement(Text, { style: styles.ctaBtn }, "Book a discovery call →"),
         React.createElement(Text, { style: styles.ctaFine }, "emvyai.com  ·  hello@emvyai.com  ·  Sydney, AU")

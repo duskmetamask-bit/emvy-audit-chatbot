@@ -74,7 +74,7 @@ function deriveFallbackRoadmap(assessment: Assessment, lead: ReportRequestBody):
       "Move to a weekly AI review cadence — what's working, what to retire, what to try next.",
       "Plan a quarterly audit checkpoint to keep the roadmap honest as the business shifts.",
     ],
-    nextStep: "Book a 30-minute discovery call and we'll map a custom 30/60/90 plan for your business.",
+    nextStep: "Book a free 15-min discovery call and we'll map a custom 30/60/90 plan for your business.",
   };
 }
 

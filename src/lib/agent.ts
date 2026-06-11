@@ -195,7 +195,7 @@ Required output format (every key required, every value a string or string array
     "Second months-2-3 action",
     "Third months-2-3 action"
   ],
-  "nextStep": "Single sentence pointing them at a 30-min discovery call with EMVY"
+  "nextStep": "Single sentence pointing them at a free 15-min discovery call with EMVY"
 }
 
 RULES
@@ -205,7 +205,7 @@ RULES
 - 3 actions per timeframe is the floor, not the ceiling. If they have 4 clear wins in week 1, give 4.
 - Score: average the category scores (1-5), multiply by 20, round. If categoriesCovered is fewer than 3, return 50 and label "Insufficient signal".
 - Score label: 0-39 "Early stage", 40-69 "Moderate readiness", 70-100 "High readiness".
-- No emojis, no exclamation marks beyond one at the end of the nextStep CTA.
+- No emojis. One exclamation mark is allowed at the end of the nextStep CTA pointing at https://emvyai.com/services/discovery-call.
 - Tone: confident, plain, helpful. Active verbs. Specific over abstract. Australian English where natural.`;
 
 export const STAGE_PLAN: Array<{ key: string; label: string; delayMs: number }> = [
