@@ -8,7 +8,7 @@
 const HERMES_BASE = process.env.HERMES_API_BASE || "http://localhost:8642/v1";
 const HERMES_KEY = process.env.API_SERVER_KEY;
 const DIRECT_KEY = process.env.MINIMAX_API_KEY;
-const DIRECT_BASE = process.env.MINIMAX_BASE_URL || "https://api.minimax.io/anthropic";
+const DIRECT_BASE = process.env.MINIMAX_BASE_URL || "https://api.minimax.io/v1";
 
 // LOCKED MODEL — MiniMax-M2.7 only. Dusk specified M2.7 for this build.
 export const LLM_MODEL = "MiniMax-M2.7";
@@ -25,7 +25,7 @@ export function resolveEndpoint(): ResolvedEndpoint {
     return { baseUrl: HERMES_BASE, apiKey: HERMES_KEY, source: "hermes", authHeader: "Authorization" };
   }
   if (DIRECT_KEY) {
-    return { baseUrl: DIRECT_BASE, apiKey: DIRECT_KEY, source: "direct", authHeader: "X-Api-Key" };
+    return { baseUrl: DIRECT_BASE, apiKey: DIRECT_KEY, source: "direct", authHeader: "Authorization" };
   }
   throw new Error(
     "No LLM credentials found. Set API_SERVER_KEY (for Hermes API server) or MINIMAX_API_KEY in .env.local"

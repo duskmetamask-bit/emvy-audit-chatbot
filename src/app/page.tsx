@@ -77,6 +77,7 @@ export default function AuditChatbot() {
   const [email, setEmail] = useState("");
   const [company, setCompany] = useState("");
   const [assessment, setAssessment] = useState<Assessment>(emptyAssessment());
+  const [sessionId, setSessionId] = useState<string>("");
   const [report, setReport] = useState<ReportData | null>(null);
   const [isGeneratingPdf, setIsGeneratingPdf] = useState(false);
   const [isBotTyping, setIsBotTyping] = useState(false);
@@ -99,17 +100,37 @@ export default function AuditChatbot() {
     if (stage === "chat") inputRef.current?.focus();
   }, [stage]);
 
+  // Initialize sessionId from sessionStorage (or mint a fresh one).
+  // Persists across page reloads so the worker's DO instance keeps
+  // accumulating history for the same lead session.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const stored = sessionStorage.getItem("emvy-audit-session-id");
+    if (stored) {
+      setSessionId(stored);
+    } else {
+      const fresh = crypto.randomUUID();
+      sessionStorage.setItem("emvy-audit-session-id", fresh);
+      setSessionId(fresh);
+    }
+  }, []);
+
   function getTimestamp() {
     return new Date().toTimeString().slice(0, 8);
   }
 
   const estimatedProgress = Math.min(100, (assessment.categoriesCovered.length / 10) * 100);
 
-  async function callChatApi(history: Message[], currentAssessment: Assessment, signal?: AbortSignal) {
+  async function callChatApi(
+    message: string,
+    currentAssessment: Assessment,
+    history: Array<{ role: "user" | "assistant"; content: string }>,
+    signal?: AbortSignal
+  ) {
     const res = await fetch("/api/chat", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ history, assessment: currentAssessment }),
+      body: JSON.stringify({ sessionId, message, assessment: currentAssessment, messages: history }),
       signal,
     });
     if (!res.ok) throw new Error("Chat request failed: " + res.status);
@@ -118,6 +139,7 @@ export default function AuditChatbot() {
       assessment: Assessment;
       toolResults: Array<{ tool: string; result: { success: boolean; data?: unknown; error?: string } }>;
       done: boolean;
+      sessionId: string;
     }>;
   }
 
@@ -129,10 +151,19 @@ export default function AuditChatbot() {
     setInput("");
     setIsBotTyping(true);
     setMessages((prev) => [...prev, { role: "bot", content: "", timestamp: getTimestamp() }]);
+    // Send the prior history (without the just-added user message). The
+    // /api/chat route appends the new user turn itself.
+    const historyForLlm = messages
+      .filter((m) => m.role === "user" || m.role === "bot")
+      .map((m) => ({ role: m.role === "bot" ? ("assistant" as const) : ("user" as const), content: m.content }));
     try {
-      const result = await callChatApi(newMessages, assessment);
-      const { message: botText, assessment: updatedAssessment } = result;
+      const result = await callChatApi(userMsg, assessment, historyForLlm);
+      const { message: botText, assessment: updatedAssessment, sessionId: returnedSessionId } = result;
       setAssessment(updatedAssessment);
+      if (returnedSessionId && returnedSessionId !== sessionId) {
+        setSessionId(returnedSessionId);
+        sessionStorage.setItem("emvy-audit-session-id", returnedSessionId);
+      }
       setIsBotTyping(false);
       if (!botText) {
         setMessages((prev) => {
