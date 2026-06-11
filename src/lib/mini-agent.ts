@@ -114,24 +114,34 @@ async function executeTool(
         assessment_summary?: AssessmentState;
       };
       try {
-        const { createClient } = await import("@supabase/supabase-js");
-        const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || "https://rrjktvvnzjzlfquaghut.supabase.co";
-        const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "";
-        const supabase = createClient(supabaseUrl, supabaseAnonKey);
-        const { data, error } = await supabase.from("leads").insert({
-          name: leadName,
-          email,
-          company: company || null,
-          business_name: assessment_summary?.business_name || null,
-          team_size: assessment_summary?.team_size || null,
-          industry: assessment_summary?.industry || null,
-          pain_points: (assessment_summary?.pain_points || []).join(" | ") || null,
-          manual_tasks: (assessment_summary?.manual_tasks || []).join(" | ") || null,
-          ai_tools: assessment_summary?.ai_tools || null,
-          assessment: assessment_summary || null,
-        }).select().single();
-        if (error) throw error;
-        return { success: true, data };
+        const { callConvexMutation } = await import("./convex");
+        const result = await callConvexMutation({
+          functionName: "audit_chatbot_leads:create",
+          args: {
+            name: leadName,
+            email,
+            company: company || undefined,
+            businessName: assessment_summary?.business_name || undefined,
+            industry: assessment_summary?.industry || undefined,
+            teamSize: assessment_summary?.team_size || undefined,
+            score: 0, // computed later by the report generator
+            scoreLabel: "Pending",
+            findings: (assessment_summary?.findings || []).map(f => ({
+              category: f.category,
+              text: f.text,
+              severity: f.severity,
+            })),
+            categoriesCovered: assessment_summary?.categories_covered || [],
+            painPoints: assessment_summary?.pain_points || [],
+            manualTasks: assessment_summary?.manual_tasks || [],
+            scores: assessment_summary?.scores || {},
+            aiTools: assessment_summary?.ai_tools || undefined,
+            budget: assessment_summary?.budget || undefined,
+            goal: assessment_summary?.goal || undefined,
+            obstacles: assessment_summary?.obstacles || undefined,
+          },
+        });
+        return { success: true, data: result };
       } catch (err: unknown) {
         const message = err instanceof Error ? err.message : "Failed to store lead";
         return { success: false, error: message };

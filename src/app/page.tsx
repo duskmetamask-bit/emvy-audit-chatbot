@@ -1,16 +1,12 @@
 "use client";
 
 import { useState, useRef, useEffect, useCallback } from "react";
-import { createClient } from "@supabase/supabase-js";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { EmvyLogo } from "@/components/EmvyLogo";
 import { BuildTheater, BuildStage } from "@/components/BuildTheater";
 import { RoadmapSection } from "@/components/RoadmapSection";
-
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || "https://rrjktvvnzjzlfquaghut.supabase.co";
-const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "eyJhbG...IJWw";
-const supabase = createClient(supabaseUrl, supabaseAnonKey);
+import { callConvexMutation } from "@/lib/convex";
 
 const BOOKING_URL = "https://emvyai.com/book";
 
@@ -236,27 +232,35 @@ export default function AuditChatbot() {
       messageCount: messages.filter((m) => m.role === "user").length,
     };
 
-    // Persist lead to Supabase in the background. Don't block the build theater.
+    // Persist lead to Convex in the background. Don't block the build theater.
+    // The mutation auto-creates/updates a `leads` row so board.emvyai.com's
+    // /pipeline picks it up, and writes an activity_log entry.
     void (async () => {
       try {
-        await supabase.from("leads").insert({
-          name,
-          email,
-          company: company || null,
-          business_name: finalAssessment.businessName || null,
-          business_description: finalAssessment.businessDescription || null,
-          team_size: finalAssessment.teamSize || null,
-          pain_points: finalAssessment.painPoints.join(" | ") || null,
-          manual_tasks: finalAssessment.manualTasks.join(" | ") || null,
-          ai_tools: finalAssessment.aiTools || null,
-          budget: finalAssessment.budget || null,
-          goal_6months: finalAssessment.goal || null,
-          obstacles: finalAssessment.obstacles || null,
-          industry: finalAssessment.industry || null,
-          assessment: finalAssessment,
+        await callConvexMutation({
+          functionName: "audit_chatbot_leads:create",
+          args: {
+            name,
+            email,
+            company: company || undefined,
+            businessName: finalAssessment.businessName || undefined,
+            industry: finalAssessment.industry || undefined,
+            teamSize: finalAssessment.teamSize || undefined,
+            score: 0,
+            scoreLabel: "Pending",
+            findings: finalAssessment.findings,
+            categoriesCovered: finalAssessment.categoriesCovered,
+            painPoints: finalAssessment.painPoints,
+            manualTasks: finalAssessment.manualTasks,
+            scores: finalAssessment.scores,
+            aiTools: finalAssessment.aiTools || undefined,
+            budget: finalAssessment.budget || undefined,
+            goal: finalAssessment.goal || undefined,
+            obstacles: finalAssessment.obstacles || undefined,
+          },
         });
       } catch (err) {
-        console.error("Supabase error:", err);
+        console.error("Convex lead write failed:", err);
       }
     })();
 
