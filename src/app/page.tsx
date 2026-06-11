@@ -3,7 +3,7 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { EmvyLogo } from "@/components/EmvyLogo";
+import { EmvyLogo, EmvyWordmark } from "@/components/EmvyLogo";
 import { BuildTheater, BuildStage } from "@/components/BuildTheater";
 import { RoadmapSection } from "@/components/RoadmapSection";
 import { callConvexMutation } from "@/lib/convex";
@@ -391,17 +391,7 @@ export default function AuditChatbot() {
             }}
             aria-label="EMVY AI Audit"
           >
-            <EmvyLogo size={22} color="var(--accent)" />
-            <span
-              style={{
-                fontFamily: "var(--font-display), 'Space Grotesk', system-ui, sans-serif",
-                fontWeight: 600,
-                fontSize: 15,
-                letterSpacing: "-0.02em",
-              }}
-            >
-              EMVY
-            </span>
+            <EmvyWordmark height={26} />
             <span style={{ color: "var(--text-muted)", fontSize: 14, fontWeight: 400 }}>· AI Audit</span>
           </div>
           {stage === "chat" && (
@@ -842,7 +832,7 @@ function ChatBubble({ msg, isBotTyping, isLast }: { msg: Message; isBotTyping: b
             gap: 8,
           }}
         >
-          <EmvyLogo size={14} color="var(--accent)" />
+          <EmvyLogo size={14} />
           <span className="label-eyebrow-accent" style={{ fontSize: 10 }}>EMVY</span>
         </div>
       )}
@@ -1037,7 +1027,7 @@ function ReportStage({
         }}
       >
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          <EmvyLogo size={20} color="var(--accent)" />
+          <EmvyLogo size={20} />
           <span className="label-eyebrow-accent">EMVY · AI Audit</span>
         </div>
         <h1

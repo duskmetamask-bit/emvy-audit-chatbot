@@ -36,7 +36,7 @@ export function BuildTheater({ stages, businessName }: BuildTheaterProps) {
           gap: 12,
         }}
       >
-        <EmvyLogo size={20} color="var(--accent)" />
+        <EmvyLogo size={20} />
         <span className="label-eyebrow-accent">EMVY · Generating</span>
       </div>
 
