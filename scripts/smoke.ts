@@ -50,7 +50,7 @@ async function main() {
     ];
 
     const t0 = Date.now();
-    const response = await chatCompletion({ messages, temperature: 0.7, maxTokens: 1024 }, process.env);
+    const response = await chatCompletion({ messages, temperature: 0.7, maxTokens: 1024 });
     const ms = Date.now() - t0;
 
     const raw = response.choices?.[0]?.message?.content ?? "";
