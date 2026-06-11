@@ -375,11 +375,35 @@ export default function AuditChatbot() {
       }
     } else if (event === "data") {
       if (payload.report) {
-        setReport(payload.report as ReportData);
-        animateScore((payload.report as ReportData).score);
+        const r = payload.report as ReportData;
+        setReport(r);
+        animateScore(r.score);
+        // Fire-and-forget: email the PDF to the lead via Resend. Doesn't
+        // block the on-screen reveal; we surface a soft warning if it fails
+        // but the user still has the report on screen and the download button.
+        void sendReportEmail(r);
         // Slight pause so the user sees the "Ready" state before the report slides in.
         setTimeout(() => setStage("report"), 600);
       }
+    }
+  }
+
+  async function sendReportEmail(r: ReportData) {
+    try {
+      const res = await fetch("/api/send-report", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          report: r,
+          lead: { name, email, company },
+        }),
+      });
+      if (!res.ok) {
+        const text = await res.text().catch(() => "");
+        console.error("[/send-report] failed:", res.status, text);
+      }
+    } catch (err) {
+      console.error("[/send-report] threw:", err);
     }
   }
 
