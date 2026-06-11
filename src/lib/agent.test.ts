@@ -1,0 +1,69 @@
+import { describe, it, expect } from "vitest";
+import { AUDIT_SYSTEM_PROMPT, CATEGORIES, TOTAL_QUESTIONS, emptyAssessment } from "./agent";
+
+describe("AUDIT_SYSTEM_PROMPT", () => {
+  it("declares exactly 13 mini-audit questions", () => {
+    // The list uses " 1." through "13." with a space prefix. The closing
+    // section references "Q13" in the email transition.
+    for (let i = 1; i <= 13; i++) {
+      expect(AUDIT_SYSTEM_PROMPT).toMatch(new RegExp(`\\b${i}\\.`));
+    }
+    expect(AUDIT_SYSTEM_PROMPT).toContain("Q13");
+  });
+
+  it("instructs the model not to emit think blocks", () => {
+    // The prompt must explicitly tell the model to skip think/reasoning
+    // blocks in its response. Check for the literal <think> tag reference
+    // and the directive "never output your reasoning".
+    expect(AUDIT_SYSTEM_PROMPT).toContain("<think>");
+    const lower = AUDIT_SYSTEM_PROMPT.toLowerCase();
+    expect(lower).toContain("never output your reasoning");
+  });
+
+  it("requires currentQuestion in the JSON output", () => {
+    expect(AUDIT_SYSTEM_PROMPT).toContain("currentQuestion");
+  });
+
+  it("defines the voice as plain and Australian", () => {
+    const lower = AUDIT_SYSTEM_PROMPT.toLowerCase();
+    expect(lower).toContain("casual");
+    expect(lower).toContain("australia");
+  });
+});
+
+describe("CATEGORIES", () => {
+  it("has 12 categories (10 original + tools + goal)", () => {
+    expect(CATEGORIES).toHaveLength(12);
+  });
+
+  it("includes the new tools and goal categories", () => {
+    const ids = CATEGORIES.map((c) => c.id);
+    expect(ids).toContain("tools");
+    expect(ids).toContain("goal");
+  });
+});
+
+describe("TOTAL_QUESTIONS", () => {
+  it("is 13", () => {
+    expect(TOTAL_QUESTIONS).toBe(13);
+  });
+});
+
+describe("emptyAssessment", () => {
+  it("starts at question 0 with no current category", () => {
+    const a = emptyAssessment();
+    expect(a.currentQuestion).toBe(0);
+    expect(a.currentCategory).toBeUndefined();
+  });
+
+  it("starts with empty arrays and false flags", () => {
+    const a = emptyAssessment();
+    expect(a.scores).toEqual({});
+    expect(a.findings).toEqual([]);
+    expect(a.painPoints).toEqual([]);
+    expect(a.manualTasks).toEqual([]);
+    expect(a.categoriesCovered).toEqual([]);
+    expect(a.messageCount).toBe(0);
+    expect(a.readyForEmail).toBe(false);
+  });
+});

@@ -10,6 +10,25 @@ import { callConvexMutation } from "@/lib/convex";
 
 const BOOKING_URL = "https://emvyai.com/book";
 
+const CATEGORY_LABELS: Record<string, string> = {
+  lead_capture: "Lead capture",
+  booking: "Booking & scheduling",
+  comms: "Customer communication",
+  ops: "Job tracking",
+  quoting: "Quotes & estimates",
+  invoicing: "Invoicing & payment",
+  followup: "Follow-up",
+  reviews: "Reviews & reputation",
+  team: "Team coordination",
+  reporting: "Reporting",
+  tools: "Tools & AI",
+  goal: "90-day goal",
+};
+
+function categoryLabel(id: string): string {
+  return CATEGORY_LABELS[id] ?? id;
+}
+
 interface Assessment {
   businessName?: string;
   businessDescription?: string;
@@ -26,6 +45,8 @@ interface Assessment {
   messageCount: number;
   categoriesCovered: string[];
   readyForEmail: boolean;
+  currentQuestion?: number;
+  currentCategory?: string;
 }
 
 function emptyAssessment(): Assessment {
@@ -37,6 +58,7 @@ function emptyAssessment(): Assessment {
     messageCount: 0,
     categoriesCovered: [],
     readyForEmail: false,
+    currentQuestion: 0,
   };
 }
 
@@ -119,7 +141,10 @@ export default function AuditChatbot() {
     return new Date().toTimeString().slice(0, 8);
   }
 
-  const estimatedProgress = Math.min(100, (assessment.categoriesCovered.length / 10) * 100);
+  const estimatedProgress = Math.min(
+    100,
+    ((assessment.currentQuestion ?? assessment.categoriesCovered.length) / 13) * 100
+  );
 
   async function callChatApi(
     message: string,
@@ -417,20 +442,20 @@ export default function AuditChatbot() {
             style={{
               display: "flex",
               alignItems: "center",
-              gap: 10,
+              gap: 12,
               color: "inherit",
             }}
-            aria-label="EMVY AI Audit"
+            aria-label="EMVY AI Mini Audit"
           >
-            <EmvyWordmark height={26} />
-            <span style={{ color: "var(--text-muted)", fontSize: 14, fontWeight: 400 }}>· AI Audit</span>
+            <EmvyWordmark height={34} />
+            <span style={{ color: "var(--text-muted)", fontSize: 18, fontWeight: 400, lineHeight: 1 }}>· AI Mini Audit</span>
           </div>
           {stage === "chat" && (
             <span className="label-meta" style={{ color: "var(--text-secondary)" }}>
               <span style={{ color: "var(--accent)", fontWeight: 500 }}>
-                {Math.round(estimatedProgress)}%
+                Question {Math.min(13, Math.max(0, assessment.currentQuestion ?? 0))} of 13
               </span>{" "}
-              through
+              · {assessment.currentCategory ? categoryLabel(assessment.currentCategory) : "starting"}
             </span>
           )}
         </div>
@@ -728,7 +753,10 @@ function ChatStage({
   onGoToEmail: () => void;
   chatEndRef: React.RefObject<HTMLDivElement | null>;
 }) {
-  const questionCount = Math.min(13, Math.max(1, Math.ceil(assessment.categoriesCovered.length * 1.3) + 1));
+  const questionNumber = Math.min(13, Math.max(1, assessment.currentQuestion ?? 0));
+  const currentCategory = assessment.currentCategory
+    ? categoryLabel(assessment.currentCategory)
+    : "Getting started";
   return (
     <div
       className="mx-auto"
@@ -830,11 +858,12 @@ function ChatStage({
               display: "flex",
               justifyContent: "space-between",
               padding: "0 4px",
+              gap: 8,
             }}
           >
             <span>Your answers stay private</span>
             <span style={{ color: "var(--accent)" }}>
-              Question {Math.min(13, questionCount)} of 13
+              Question {questionNumber} of 13 · {currentCategory}
             </span>
           </div>
         </div>
