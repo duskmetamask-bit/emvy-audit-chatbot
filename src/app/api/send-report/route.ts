@@ -17,7 +17,9 @@ interface SendRequestBody {
   lead: ReportLead;
 }
 
-const FROM_ADDRESS = process.env.RESEND_FROM_EMAIL || "EMVY <hello@emvyai.com>";
+const FROM_NAME = process.env.RESEND_FROM_NAME || "EMVY";
+const FROM_EMAIL = process.env.RESEND_FROM_EMAIL || "hello@emvyai.com";
+const FROM_ADDRESS = `${FROM_NAME} <${FROM_EMAIL}>`;
 
 export async function POST(req: NextRequest) {
   let body: SendRequestBody;
