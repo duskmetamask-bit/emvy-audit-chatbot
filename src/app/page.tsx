@@ -7,6 +7,7 @@ import { EmvyLogo, EmvyWordmark } from "@/components/EmvyLogo";
 import { BuildTheater, BuildStage } from "@/components/BuildTheater";
 import { RoadmapSection } from "@/components/RoadmapSection";
 import { callConvexMutation } from "@/lib/convex";
+import { TOTAL_QUESTIONS } from "@/lib/agent";
 
 const BOOKING_URL = "https://emvyai.com/services/discovery-call";
 
@@ -111,6 +112,9 @@ export default function AuditChatbot() {
 
   const chatEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  // Holds the audit_chatbot_leads row id from the :create call so the
+  // :update backfill can target the same row after the report lands.
+  const chatbotLeadIdRef = useRef<string | null>(null);
 
   // Auto-scroll on new messages
   useEffect(() => {
@@ -143,7 +147,7 @@ export default function AuditChatbot() {
 
   const estimatedProgress = Math.min(
     100,
-    ((assessment.currentQuestion ?? assessment.categoriesCovered.length) / 13) * 100
+    ((assessment.currentQuestion ?? assessment.categoriesCovered.length) / TOTAL_QUESTIONS) * 100
   );
 
   async function callChatApi(
@@ -290,10 +294,12 @@ export default function AuditChatbot() {
 
     // Persist lead to Convex in the background. Don't block the build theater.
     // The mutation auto-creates/updates a `leads` row so board.emvyai.com's
-    // /pipeline picks it up, and writes an activity_log entry.
+    // /pipeline picks it up, writes an activity_log entry, and returns the
+    // chatbotLeadId we stash in a ref so :update can target the same row
+    // after the report lands.
     void (async () => {
       try {
-        await callConvexMutation({
+        const result = (await callConvexMutation({
           functionName: "audit_chatbot_leads:create",
           args: {
             name,
@@ -314,7 +320,10 @@ export default function AuditChatbot() {
             goal: finalAssessment.goal || undefined,
             obstacles: finalAssessment.obstacles || undefined,
           },
-        });
+        })) as { chatbotLeadId?: string } | null;
+        if (result?.chatbotLeadId) {
+          chatbotLeadIdRef.current = result.chatbotLeadId;
+        }
       } catch (err) {
         console.error("Convex lead write failed:", err);
       }
@@ -378,6 +387,28 @@ export default function AuditChatbot() {
         const r = payload.report as ReportData;
         setReport(r);
         animateScore(r.score);
+        // Backfill the full report to Convex so the board pipeline shows the
+        // real score + summary + 30/60/90 instead of the "Pending / 0" stub
+        // that :create wrote at email-submit time. Fire-and-forget.
+        const chatbotLeadId = chatbotLeadIdRef.current;
+        if (chatbotLeadId) {
+          void callConvexMutation({
+            functionName: "audit_chatbot_leads:update",
+            args: {
+              id: chatbotLeadId,
+              score: r.score,
+              scoreLabel: r.scoreLabel,
+              scoreBlurb: r.scoreBlurb,
+              summary: r.summary,
+              week1: r.week1,
+              weeks24: r.weeks24,
+              months23: r.months23,
+              nextStep: r.nextStep,
+            },
+          }).catch((err) => console.error("Convex report backfill failed:", err));
+        } else {
+          console.warn("chatbotLeadId not set — :create may have failed; report not backfilled");
+        }
         // Fire-and-forget: email the PDF to the lead via Resend. Doesn't
         // block the on-screen reveal; we surface a soft warning if it fails
         // but the user still has the report on screen and the download button.
@@ -477,7 +508,7 @@ export default function AuditChatbot() {
           {stage === "chat" && (
             <span className="label-meta" style={{ color: "var(--text-secondary)" }}>
               <span style={{ color: "var(--accent)", fontWeight: 500 }}>
-                Question {Math.min(13, Math.max(0, assessment.currentQuestion ?? 0))} of 13
+                Question {Math.min(TOTAL_QUESTIONS, Math.max(0, assessment.currentQuestion ?? 0))} of {TOTAL_QUESTIONS}
               </span>{" "}
               · {assessment.currentCategory ? categoryLabel(assessment.currentCategory) : "starting"}
             </span>
@@ -610,7 +641,7 @@ function WelcomeScreen({ onStart }: { onStart: () => void }) {
             animation: "fadeUp var(--motion-slow) var(--ease-out) 220ms forwards",
           }}
         >
-          Answer 13 short questions about how your business runs day to day.
+          Answer {TOTAL_QUESTIONS} short questions about how your business runs day to day.
           Walk away with a personalised 30/60/90 day plan you can ship this week — built by EMVY, ready to action.
         </p>
 
@@ -777,7 +808,7 @@ function ChatStage({
   onGoToEmail: () => void;
   chatEndRef: React.RefObject<HTMLDivElement | null>;
 }) {
-  const questionNumber = Math.min(13, Math.max(1, assessment.currentQuestion ?? 0));
+  const questionNumber = Math.min(TOTAL_QUESTIONS, Math.max(1, assessment.currentQuestion ?? 0));
   const currentCategory = assessment.currentCategory
     ? categoryLabel(assessment.currentCategory)
     : "Getting started";
@@ -799,7 +830,7 @@ function ChatStage({
           />
         ))}
 
-        {assessment.readyForEmail && !isBotTyping && (
+        {(assessment.readyForEmail || (assessment.currentQuestion ?? 0) >= TOTAL_QUESTIONS) && !isBotTyping && (
           <div style={{ display: "flex", justifyContent: "flex-start" }} className="animate-fade-up">
             <button onClick={onGoToEmail} className="btn-primary">
               Get my roadmap
@@ -887,7 +918,7 @@ function ChatStage({
           >
             <span>Your answers stay private</span>
             <span style={{ color: "var(--accent)" }}>
-              Question {questionNumber} of 13 · {currentCategory}
+              Question {questionNumber} of {TOTAL_QUESTIONS} · {currentCategory}
             </span>
           </div>
         </div>
