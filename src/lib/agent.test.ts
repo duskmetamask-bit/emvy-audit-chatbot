@@ -14,10 +14,11 @@ describe("AUDIT_SYSTEM_PROMPT", () => {
   it("instructs the model not to emit think blocks", () => {
     // The prompt must explicitly tell the model to skip think/reasoning
     // blocks in its response. Check for the literal <think> tag reference
-    // and the directive "never output your reasoning".
+    // and a directive against chain-of-thought.
     expect(AUDIT_SYSTEM_PROMPT).toContain("<think>");
     const lower = AUDIT_SYSTEM_PROMPT.toLowerCase();
-    expect(lower).toContain("never output your reasoning");
+    expect(lower).toContain("chain-of-thought");
+    expect(lower).toContain("reasoning");
   });
 
   it("requires currentQuestion in the JSON output", () => {
@@ -28,6 +29,28 @@ describe("AUDIT_SYSTEM_PROMPT", () => {
     const lower = AUDIT_SYSTEM_PROMPT.toLowerCase();
     expect(lower).toContain("casual");
     expect(lower).toContain("australia");
+  });
+
+  it("provides a rotation pool of reaction beats", () => {
+    // The opener pool is what stops the model defaulting to "cool" / "right"
+    // on every turn. Check that at least 5 distinct beat shapes are listed.
+    const lower = AUDIT_SYSTEM_PROMPT.toLowerCase();
+    const beats = ["cool", "right", "got it", "fair", "noted", "yep", "mm", "makes sense"];
+    const found = beats.filter((b) => lower.includes(b));
+    expect(found.length).toBeGreaterThanOrEqual(5);
+  });
+
+  it("enforces anti-repetition on reaction beats", () => {
+    const lower = AUDIT_SYSTEM_PROMPT.toLowerCase();
+    expect(lower).toMatch(/anti-?repetition|never start two|consecutive beats?/);
+  });
+
+  it("documents adaptive question selection (skip / acknowledge)", () => {
+    const lower = AUDIT_SYSTEM_PROMPT.toLowerCase();
+    expect(lower).toMatch(/adaptive/);
+    expect(lower).toContain("skip");
+    expect(lower).toContain("acknowledge");
+    expect(lower).toContain("categoriescovered");
   });
 });
 
