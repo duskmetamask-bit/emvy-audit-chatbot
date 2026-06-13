@@ -6,7 +6,7 @@ import remarkGfm from "remark-gfm";
 import { EmvyLogo, EmvyWordmark } from "@/components/EmvyLogo";
 import { BuildTheater, BuildStage } from "@/components/BuildTheater";
 import { RoadmapSection } from "@/components/RoadmapSection";
-import { callConvexMutation } from "@/lib/convex";
+import { callConvexMutation, callConvexQuery } from "@/lib/convex";
 import { TOTAL_QUESTIONS } from "@/lib/agent";
 import {
   useAuditStore,
@@ -102,16 +102,107 @@ export default function AuditChatbot() {
   const setEmail = useCallback((next: string) => patch({ email: next }), [patch]);
   const setCompany = useCallback((next: string) => patch({ company: next }), [patch]);
 
-  // Mount-only restore. Falls back to the email stage if the user
-  // reloaded mid-build (the in-flight SSE can't be replayed, and the
-  // persisted :create row is the better source of truth than a brand
-  // new `:create` + duplicate Resend). v1.1 will add a "build
-  // interrupted" interstitial.
+  // Streams the report SSE. Used by both the email-submit path
+  // (handleEmailSubmit, which passes the fresh-messageCount assessment)
+  // and the v1.1 reload-recovery path (recoverFromBuild, when the
+  // Convex row is still a stub — uses the LLM-set assessment directly).
+  // The stream handler (parseSseChunk) is the same in both — it patches
+  // `report`, fires :update keyed on chatbotLeadId, and (gated on
+  // `!state.reportSent`) sends the Resend email. Throws on transport
+  // failure; caller decides the fallback.
+  async function sendReportSse(assessmentOverride?: Assessment) {
+    const assessmentForSse = assessmentOverride ?? assessment;
+    const res = await fetch("/api/report", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ assessment: assessmentForSse, name, email, company }),
+    });
+    if (!res.ok || !res.body) throw new Error("Report stream failed");
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      let lineEnd;
+      while ((lineEnd = buffer.indexOf("\n\n")) !== -1) {
+        const chunk = buffer.slice(0, lineEnd);
+        buffer = buffer.slice(lineEnd + 2);
+        parseSseChunk(chunk);
+      }
+    }
+  }
+
+  // v1.1 build-interrupted recovery. Runs once on mount if the
+  // persisted stage is `building`. Three branches:
+  //   - no chatbotLeadId → :create never landed, fall back to email stage
+  //   - row has the real report fields → hydrate + jump (no LLM re-run)
+  //   - row is stub OR query failed → re-fire the SSE (re-runs :update + Resend)
+  async function recoverFromBuild() {
+    if (!state.chatbotLeadId) {
+      patch({ stage: "email" });
+      return;
+    }
+    try {
+      const row = await callConvexQuery<Record<string, unknown>>({
+        functionName: "audit_chatbot_leads:get",
+        args: { id: state.chatbotLeadId },
+      });
+      if (row && isReportReady(row)) {
+        const r: ReportData = {
+          score: typeof row.score === "number" ? row.score : 0,
+          scoreLabel: typeof row.scoreLabel === "string" ? row.scoreLabel : "",
+          scoreBlurb: typeof row.scoreBlurb === "string" ? row.scoreBlurb : "",
+          businessName: typeof row.businessName === "string" ? row.businessName : "",
+          industry: typeof row.industry === "string" ? row.industry : "",
+          summary: typeof row.summary === "string" ? row.summary : "",
+          week1: Array.isArray(row.week1) ? (row.week1 as string[]) : [],
+          weeks24: Array.isArray(row.weeks24) ? (row.weeks24 as string[]) : [],
+          months23: Array.isArray(row.months23) ? (row.months23 as string[]) : [],
+          nextStep: typeof row.nextStep === "string" ? row.nextStep : "",
+        };
+        patch({ report: r, completedAt: new Date().toISOString() });
+        // If the original SSE completed but the email was never attempted
+        // (the user reloaded in the narrow window between the SSE `data`
+        // event and the Resend fetch), the persisted `reportSent` is
+        // false. Patch it BEFORE firing the email so any subsequent
+        // reload that hits this branch sees the gate closed and the
+        // `reportSent: true` state is the source of truth.
+        if (!state.reportSent) {
+          patch({ reportSent: true });
+          void sendReportEmail(r);
+        }
+        setStage("report");
+        return;
+      }
+    } catch (err) {
+      console.error("Recovery check failed:", err);
+    }
+    // Stub row or query failed — re-fire. The SSE handler's
+    // :update is keyed on chatbotLeadId so it's idempotent against the
+    // original :update that may have already run.
+    try {
+      await sendReportSse();
+    } catch (err) {
+      console.error("Re-fired report stream error:", err);
+      setStage("email");
+    }
+  }
+
+  // Mount-only restore. v1.1 build-interrupted recovery: if the user
+  // reloaded mid-build, the BuildTheater is already rendering (the
+  // stage === "building" gate in the JSX). recoverFromBuild runs once:
+  //   1. if no chatbotLeadId, fall back to email stage (the :create IIFE
+  //      from handleEmailSubmit was killed before the response landed)
+  //   2. if the Convex row has the real report fields, hydrate state and
+  //      jump to the report stage (no LLM re-run, no Resend duplicate)
+  //   3. otherwise (stub row or query failed), re-fire the SSE — the SSE
+  //      handler re-runs :update + (gated) Resend, same as a fresh submit
   useEffect(() => {
     if (state.stage === "building") {
-      patch({ stage: "email" });
+      void recoverFromBuild();
     }
-    // Run once on mount only.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -343,30 +434,12 @@ export default function AuditChatbot() {
       })();
     }
 
-    // Open the SSE stream.
+    // Open the SSE stream. sendReportSse is the shared helper — same one
+    // the v1.1 recovery path uses when it has to re-fire because the
+    // Convex row is still a stub. The stream handler is unchanged.
+    // Pass finalAssessment so the fresh messageCount reaches the LLM.
     try {
-      const res = await fetch("/api/report", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ assessment: finalAssessment, name, email, company }),
-      });
-      if (!res.ok || !res.body) throw new Error("Report stream failed");
-      const reader = res.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = "";
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-
-        let lineEnd;
-        while ((lineEnd = buffer.indexOf("\n\n")) !== -1) {
-          const chunk = buffer.slice(0, lineEnd);
-          buffer = buffer.slice(lineEnd + 2);
-          parseSseChunk(chunk);
-        }
-      }
+      await sendReportSse(finalAssessment);
     } catch (err) {
       console.error("Report stream error:", err);
       setEmailError("Report generation failed — try again in a moment.");
@@ -632,6 +705,21 @@ export default function AuditChatbot() {
         )}
       </main>
     </div>
+  );
+}
+
+// Distinguishes a real report row (post-:update) from the stub
+// row that :create writes at email-submit time. The stub has
+// `scoreLabel: "Pending"` and `week1: []`; the real row has
+// either a non-Pending label OR a non-empty week1. The check is
+// belt-and-braces: if the SSE completed and :update ran, both
+// fields are in their ready form; if the SSE was killed mid-flight,
+// both are in their stub form.
+function isReportReady(row: Record<string, unknown>): boolean {
+  return (
+    row.scoreLabel !== "Pending" &&
+    Array.isArray(row.week1) &&
+    row.week1.length > 0
   );
 }
 

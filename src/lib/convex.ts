@@ -40,3 +40,29 @@ export async function callConvexMutation(opts: ConvexCallOptions): Promise<unkno
   }
   return data.value;
 }
+
+// Mirrors callConvexMutation against the `/api/query` endpoint. Used by the
+// reload-recovery path in page.tsx to read back a chatbot_lead row by id
+// after a mid-build page reload — the report we may already have on the
+// server. Throws on non-2xx / Convex-side errors (the caller catches and
+// falls through to the SSE re-fire branch).
+export async function callConvexQuery<T = unknown>(opts: ConvexCallOptions): Promise<T | null> {
+  const res = await fetch(`${CONVEX_URL}/api/query`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      path: opts.functionName,
+      args: opts.args,
+      format: "json",
+    }),
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`Convex query failed (${res.status}): ${text}`);
+  }
+  const data = (await res.json()) as { status: string; value?: T; errorMessage?: string };
+  if (data.status === "error") {
+    throw new Error(`Convex error: ${data.errorMessage}`);
+  }
+  return (data.value as T) ?? null;
+}
