@@ -8,6 +8,13 @@ import { BuildTheater, BuildStage } from "@/components/BuildTheater";
 import { RoadmapSection } from "@/components/RoadmapSection";
 import { callConvexMutation } from "@/lib/convex";
 import { TOTAL_QUESTIONS } from "@/lib/agent";
+import {
+  useAuditStore,
+  type Message,
+  type Assessment,
+  type ReportData,
+  type Stage,
+} from "@/lib/use-audit-store";
 
 const BOOKING_URL = "https://emvyai.com/services/discovery-call";
 
@@ -30,61 +37,6 @@ function categoryLabel(id: string): string {
   return CATEGORY_LABELS[id] ?? id;
 }
 
-interface Assessment {
-  businessName?: string;
-  businessDescription?: string;
-  teamSize?: string;
-  scores: Record<string, number>;
-  findings: Array<{ category: string; text: string; severity: "high" | "medium" | "low" }>;
-  painPoints: string[];
-  manualTasks: string[];
-  aiTools?: string;
-  budget?: string;
-  goal?: string;
-  obstacles?: string;
-  industry?: string;
-  messageCount: number;
-  categoriesCovered: string[];
-  readyForEmail: boolean;
-  currentQuestion?: number;
-  currentCategory?: string;
-}
-
-function emptyAssessment(): Assessment {
-  return {
-    scores: {},
-    findings: [],
-    painPoints: [],
-    manualTasks: [],
-    messageCount: 0,
-    categoriesCovered: [],
-    readyForEmail: false,
-    currentQuestion: 0,
-  };
-}
-
-interface ReportData {
-  score: number;
-  scoreLabel: string;
-  scoreBlurb: string;
-  businessName: string;
-  industry: string;
-  summary: string;
-  week1: string[];
-  weeks24: string[];
-  months23: string[];
-  nextStep: string;
-}
-
-interface Message {
-  role: "bot" | "user";
-  content: string;
-  timestamp?: string;
-  step?: string;
-}
-
-type Stage = "welcome" | "chat" | "email" | "building" | "report";
-
 const STAGE_PLAN: Array<{ key: string; label: string }> = [
   { key: "mapping_week1", label: "Mapping your week 1 priorities" },
   { key: "drafting_weeks24", label: "Drafting your 30-day plan" },
@@ -93,15 +45,22 @@ const STAGE_PLAN: Array<{ key: string; label: string }> = [
 ];
 
 export default function AuditChatbot() {
-  const [stage, setStage] = useState<Stage>("welcome");
-  const [messages, setMessages] = useState<Message[]>([]);
+  // Persistent state — survives page reloads. Backed by localStorage via
+  // useSyncExternalStore. The transient `isBotTyping` / `scoreDisplay` /
+  // `buildStages` / `input` / `emailError` / `isGeneratingPdf` stay as
+  // local useState because persisting them would write to localStorage on
+  // every keystroke / RAF tick.
+  const { state, patch, clear } = useAuditStore();
+  const stage = state.stage;
+  const messages = state.messages;
+  const assessment = state.assessment;
+  const sessionId = state.sessionId;
+  const report = state.report;
+  const name = state.name;
+  const email = state.email;
+  const company = state.company;
+
   const [input, setInput] = useState("");
-  const [name, setName] = useState("");
-  const [email, setEmail] = useState("");
-  const [company, setCompany] = useState("");
-  const [assessment, setAssessment] = useState<Assessment>(emptyAssessment());
-  const [sessionId, setSessionId] = useState<string>("");
-  const [report, setReport] = useState<ReportData | null>(null);
   const [isGeneratingPdf, setIsGeneratingPdf] = useState(false);
   const [isBotTyping, setIsBotTyping] = useState(false);
   const [emailError, setEmailError] = useState("");
@@ -112,9 +71,49 @@ export default function AuditChatbot() {
 
   const chatEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
-  // Holds the audit_chatbot_leads row id from the :create call so the
-  // :update backfill can target the same row after the report lands.
-  const chatbotLeadIdRef = useRef<string | null>(null);
+  // Mirrors state.chatbotLeadId for synchronous reads inside the
+  // SSE `data` handler. On a restore, the ref is primed from the store
+  // so the backfill path can target the same :create row.
+  const chatbotLeadIdRef = useRef<string | null>(state.chatbotLeadId);
+
+  // Thin local setters so the existing call sites don't change shape.
+  // The `next` form (a value) and the `updater` form (a function) both
+  // work, mirroring React's `setState` contract — the typewriter interval
+  // uses the updater form, the rest of the codebase uses the value form.
+  const setMessages = useCallback(
+    (next: Message[] | ((prev: Message[]) => Message[])) => {
+      patch({ messages: typeof next === "function" ? next(messages) : next });
+    },
+    [patch, messages]
+  );
+  const setAssessment = useCallback(
+    (next: Assessment | ((prev: Assessment) => Assessment)) => {
+      patch({ assessment: typeof next === "function" ? next(assessment) : next });
+    },
+    [patch, assessment]
+  );
+  const setStage = useCallback((next: Stage) => patch({ stage: next }), [patch]);
+  const setSessionId = useCallback((next: string) => patch({ sessionId: next }), [patch]);
+  const setReport = useCallback(
+    (next: ReportData | null) => patch({ report: next, completedAt: next ? new Date().toISOString() : null }),
+    [patch]
+  );
+  const setName = useCallback((next: string) => patch({ name: next }), [patch]);
+  const setEmail = useCallback((next: string) => patch({ email: next }), [patch]);
+  const setCompany = useCallback((next: string) => patch({ company: next }), [patch]);
+
+  // Mount-only restore. Falls back to the email stage if the user
+  // reloaded mid-build (the in-flight SSE can't be replayed, and the
+  // persisted :create row is the better source of truth than a brand
+  // new `:create` + duplicate Resend). v1.1 will add a "build
+  // interrupted" interstitial.
+  useEffect(() => {
+    if (state.stage === "building") {
+      patch({ stage: "email" });
+    }
+    // Run once on mount only.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Auto-scroll on new messages
   useEffect(() => {
@@ -126,20 +125,14 @@ export default function AuditChatbot() {
     if (stage === "chat") inputRef.current?.focus();
   }, [stage]);
 
-  // Initialize sessionId from sessionStorage (or mint a fresh one).
-  // Persists across page reloads so the worker's DO instance keeps
-  // accumulating history for the same lead session.
+  // Mint a sessionId on first run if the store doesn't have one yet. The
+  // store owns it now (was sessionStorage-only); surviving a reload means
+  // the conversation history we send to /api/chat stays coherent.
   useEffect(() => {
     if (typeof window === "undefined") return;
-    const stored = sessionStorage.getItem("emvy-audit-session-id");
-    if (stored) {
-      setSessionId(stored);
-    } else {
-      const fresh = crypto.randomUUID();
-      sessionStorage.setItem("emvy-audit-session-id", fresh);
-      setSessionId(fresh);
-    }
-  }, []);
+    if (state.sessionId) return;
+    patch({ sessionId: crypto.randomUUID() });
+  }, [patch, state.sessionId]);
 
   function getTimestamp() {
     return new Date().toTimeString().slice(0, 8);
@@ -191,7 +184,8 @@ export default function AuditChatbot() {
       setAssessment(updatedAssessment);
       if (returnedSessionId && returnedSessionId !== sessionId) {
         setSessionId(returnedSessionId);
-        sessionStorage.setItem("emvy-audit-session-id", returnedSessionId);
+        // sessionId now lives in the store (localStorage-backed), so a
+        // page reload keeps the same correlation id for the next LLM turn.
       }
       setIsBotTyping(false);
       if (!botText) {
@@ -278,6 +272,16 @@ export default function AuditChatbot() {
     requestAnimationFrame(tick);
   }, []);
 
+  // Re-run the score tween whenever a report becomes visible — both on
+  // first paint after a restore and after a fresh SSE arrival in the
+  // same session. The transient scoreDisplay is 0 on reload, so the
+  // restored reveal animates from 0 → score just like a fresh run.
+  useEffect(() => {
+    if (stage === "report" && report) {
+      animateScore(report.score);
+    }
+  }, [stage, report, animateScore]);
+
   async function handleEmailSubmit() {
     setEmailError("");
     if (!name.trim()) { setEmailError("Please enter your name"); return; }
@@ -295,39 +299,49 @@ export default function AuditChatbot() {
     // Persist lead to Convex in the background. Don't block the build theater.
     // The mutation auto-creates/updates a `leads` row so board.emvyai.com's
     // /pipeline picks it up, writes an activity_log entry, and returns the
-    // chatbotLeadId we stash in a ref so :update can target the same row
-    // after the report lands.
-    void (async () => {
-      try {
-        const result = (await callConvexMutation({
-          functionName: "audit_chatbot_leads:create",
-          args: {
-            name,
-            email,
-            company: company || undefined,
-            businessName: finalAssessment.businessName || undefined,
-            industry: finalAssessment.industry || undefined,
-            teamSize: finalAssessment.teamSize || undefined,
-            score: 0,
-            scoreLabel: "Pending",
-            findings: finalAssessment.findings,
-            categoriesCovered: finalAssessment.categoriesCovered,
-            painPoints: finalAssessment.painPoints,
-            manualTasks: finalAssessment.manualTasks,
-            scores: finalAssessment.scores,
-            aiTools: finalAssessment.aiTools || undefined,
-            budget: finalAssessment.budget || undefined,
-            goal: finalAssessment.goal || undefined,
-            obstacles: finalAssessment.obstacles || undefined,
-          },
-        })) as { chatbotLeadId?: string } | null;
-        if (result?.chatbotLeadId) {
-          chatbotLeadIdRef.current = result.chatbotLeadId;
+    // chatbotLeadId we stash in a ref + the store so :update can target the
+    // same row after the report lands.
+    //
+    // Idempotency: if the user reloaded mid-build (the building→email mount
+    // fallback returned them here) and a `:create` already ran on the
+    // previous attempt, the persisted `chatbotLeadId` is non-null and we
+    // skip the new `:create` — the `:update` backfill after the report
+    // lands will patch the existing row.
+    const existingLeadId = chatbotLeadIdRef.current ?? state.chatbotLeadId;
+    if (!existingLeadId) {
+      void (async () => {
+        try {
+          const result = (await callConvexMutation({
+            functionName: "audit_chatbot_leads:create",
+            args: {
+              name,
+              email,
+              company: company || undefined,
+              businessName: finalAssessment.businessName || undefined,
+              industry: finalAssessment.industry || undefined,
+              teamSize: finalAssessment.teamSize || undefined,
+              score: 0,
+              scoreLabel: "Pending",
+              findings: finalAssessment.findings,
+              categoriesCovered: finalAssessment.categoriesCovered,
+              painPoints: finalAssessment.painPoints,
+              manualTasks: finalAssessment.manualTasks,
+              scores: finalAssessment.scores,
+              aiTools: finalAssessment.aiTools || undefined,
+              budget: finalAssessment.budget || undefined,
+              goal: finalAssessment.goal || undefined,
+              obstacles: finalAssessment.obstacles || undefined,
+            },
+          })) as { chatbotLeadId?: string } | null;
+          if (result?.chatbotLeadId) {
+            chatbotLeadIdRef.current = result.chatbotLeadId;
+            patch({ chatbotLeadId: result.chatbotLeadId });
+          }
+        } catch (err) {
+          console.error("Convex lead write failed:", err);
         }
-      } catch (err) {
-        console.error("Convex lead write failed:", err);
-      }
-    })();
+      })();
+    }
 
     // Open the SSE stream.
     try {
@@ -386,11 +400,12 @@ export default function AuditChatbot() {
       if (payload.report) {
         const r = payload.report as ReportData;
         setReport(r);
-        animateScore(r.score);
+        // The score-tween useEffect ([stage, report]) re-runs animateScore
+        // automatically — the manual call here would double-fire.
         // Backfill the full report to Convex so the board pipeline shows the
         // real score + summary + 30/60/90 instead of the "Pending / 0" stub
         // that :create wrote at email-submit time. Fire-and-forget.
-        const chatbotLeadId = chatbotLeadIdRef.current;
+        const chatbotLeadId = chatbotLeadIdRef.current ?? state.chatbotLeadId;
         if (chatbotLeadId) {
           void callConvexMutation({
             functionName: "audit_chatbot_leads:update",
@@ -412,7 +427,15 @@ export default function AuditChatbot() {
         // Fire-and-forget: email the PDF to the lead via Resend. Doesn't
         // block the on-screen reveal; we surface a soft warning if it fails
         // but the user still has the report on screen and the download button.
-        void sendReportEmail(r);
+        //
+        // Gated on `reportSent` so a page reload after the report landed
+        // doesn't re-email the lead. The flag is set in the same patch
+        // call as `setReport` above, so a state where `report !== null &&
+        // reportSent === false` is impossible on disk.
+        if (!state.reportSent) {
+          patch({ reportSent: true });
+          void sendReportEmail(r);
+        }
         // Slight pause so the user sees the "Ready" state before the report slides in.
         setTimeout(() => setStage("report"), 600);
       }
@@ -505,14 +528,35 @@ export default function AuditChatbot() {
             <EmvyWordmark height={48} />
             <span style={{ color: "var(--text-muted)", fontSize: 22, fontWeight: 400, lineHeight: 1 }}>· AI Mini Audit</span>
           </div>
-          {stage === "chat" && (
-            <span className="label-meta" style={{ color: "var(--text-secondary)" }}>
-              <span style={{ color: "var(--accent)", fontWeight: 500 }}>
-                Question {Math.min(TOTAL_QUESTIONS, Math.max(0, assessment.currentQuestion ?? 0))} of {TOTAL_QUESTIONS}
-              </span>{" "}
-              · {assessment.currentCategory ? categoryLabel(assessment.currentCategory) : "starting"}
-            </span>
-          )}
+          <div style={{ display: "flex", alignItems: "center", gap: 18 }}>
+            {stage !== "welcome" && state.messages.length > 0 && (
+              <button
+                type="button"
+                onClick={() => {
+                  clear();
+                  window.location.reload();
+                }}
+                className="label-meta"
+                style={{
+                  background: "none",
+                  border: "none",
+                  padding: 0,
+                  cursor: "pointer",
+                  color: "var(--text-muted)",
+                }}
+              >
+                Start over
+              </button>
+            )}
+            {stage === "chat" && (
+              <span className="label-meta" style={{ color: "var(--text-secondary)" }}>
+                <span style={{ color: "var(--accent)", fontWeight: 500 }}>
+                  Question {Math.min(TOTAL_QUESTIONS, Math.max(0, assessment.currentQuestion ?? 0))} of {TOTAL_QUESTIONS}
+                </span>{" "}
+                · {assessment.currentCategory ? categoryLabel(assessment.currentCategory) : "starting"}
+              </span>
+            )}
+          </div>
         </div>
 
         {/* Slim progress line during chat */}
@@ -527,7 +571,23 @@ export default function AuditChatbot() {
       </header>
 
       <main className="flex-1 overflow-auto">
-        {stage === "welcome" && <WelcomeScreen onStart={() => { setStage("chat"); void sendMessage("Hey, ready when you are."); }} />}
+        {stage === "welcome" && <WelcomeScreen onStart={() => {
+          // Restore gate: if the user reloaded mid-conversation, the
+          // persisted state is already at `chat` with messages restored
+          // and the header chip already shows progress. We never get
+          // here on that path (the `<WelcomeScreen />` only renders
+          // when `stage === "welcome"`), but the `state.messages.length`
+          // check is a belt-and-braces guard in case the stage value
+          // desyncs from the message list (e.g., a future feature
+          // that returns to welcome mid-conversation).
+          if (state.messages.length > 0) {
+            setStage("chat");
+            return;
+          }
+          setStage("chat");
+          patch({ startedAt: state.startedAt ?? new Date().toISOString() });
+          void sendMessage("Hey, ready when you are.");
+        }} />}
         {stage === "chat" && (
           <ChatStage
             messages={messages}
