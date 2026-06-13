@@ -147,7 +147,9 @@ export default function AuditChatbot() {
   //   - row has the real report fields → hydrate + jump (no LLM re-run)
   //   - row is stub OR query failed → re-fire the SSE (re-runs :update + Resend)
   async function recoverFromBuild() {
+    console.log("[recoverFromBuild] called, chatbotLeadId=", state.chatbotLeadId);
     if (!state.chatbotLeadId) {
+      console.log("[recoverFromBuild] no lead id, patching to email");
       patch({ stage: "email" });
       return;
     }
@@ -216,9 +218,11 @@ export default function AuditChatbot() {
   // in-session transitions into "building" (e.g., the user finishing the
   // email form in this tab) are ignored.
   useEffect(() => {
+    console.log("[recovery-effect] fired, stage=", state.stage, "hasRecovered=", hasRecoveredRef.current);
     if (hasRecoveredRef.current) return;
     hasRecoveredRef.current = true;
     if (state.stage === "building") {
+      console.log("[recovery-effect] invoking recoverFromBuild");
       void recoverFromBuild();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
