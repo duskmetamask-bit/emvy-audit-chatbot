@@ -75,6 +75,13 @@ export default function AuditChatbot() {
   // SSE `data` handler. On a restore, the ref is primed from the store
   // so the backfill path can target the same :create row.
   const chatbotLeadIdRef = useRef<string | null>(state.chatbotLeadId);
+  // Guard: recoverFromBuild must run at most once per page-load, and only
+  // on the first hydration where stage is "building". The `[]`-deps
+  // useEffect below can't see the client-snapshot stage (useSyncExternalStore
+  // commits the server-snapshot first, then re-renders with the localStorage
+  // state — a `[]`-deps effect captures the server-snapshot value), so we
+  // depend on `state.stage` and use this ref to make the run idempotent.
+  const hasRecoveredRef = useRef(false);
 
   // Thin local setters so the existing call sites don't change shape.
   // The `next` form (a value) and the `updater` form (a function) both
@@ -190,21 +197,32 @@ export default function AuditChatbot() {
     }
   }
 
-  // Mount-only restore. v1.1 build-interrupted recovery: if the user
-  // reloaded mid-build, the BuildTheater is already rendering (the
-  // stage === "building" gate in the JSX). recoverFromBuild runs once:
+  // v1.1 build-interrupted recovery. Runs once on the first hydration
+  // tick where stage is "building". If the user reloaded mid-build, the
+  // BuildTheater is already rendering (the stage === "building" gate in
+  // the JSX). recoverFromBuild runs once:
   //   1. if no chatbotLeadId, fall back to email stage (the :create IIFE
   //      from handleEmailSubmit was killed before the response landed)
   //   2. if the Convex row has the real report fields, hydrate state and
   //      jump to the report stage (no LLM re-run, no Resend duplicate)
   //   3. otherwise (stub row or query failed), re-fire the SSE — the SSE
   //      handler re-runs :update + (gated) Resend, same as a fresh submit
+  //
+  // We depend on `state.stage` (not `[]`) because `useSyncExternalStore`
+  // commits the SSR snapshot first (stage: "welcome") and re-renders with
+  // the localStorage state on the next tick; a `[]`-deps effect captures
+  // the SSR value and never sees the persisted "building". The
+  // hasRecoveredRef guard keeps the run once-per-page-load: subsequent
+  // in-session transitions into "building" (e.g., the user finishing the
+  // email form in this tab) are ignored.
   useEffect(() => {
+    if (hasRecoveredRef.current) return;
+    hasRecoveredRef.current = true;
     if (state.stage === "building") {
       void recoverFromBuild();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [state.stage]);
 
   // Auto-scroll on new messages
   useEffect(() => {
