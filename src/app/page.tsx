@@ -83,21 +83,29 @@ export default function AuditChatbot() {
   // depend on `state.stage` and use this ref to make the run idempotent.
   const hasRecoveredRef = useRef(false);
 
-  // Thin local setters so the existing call sites don't change shape.
-  // The `next` form (a value) and the `updater` form (a function) both
-  // work, mirroring React's `setState` contract — the typewriter interval
-  // uses the updater form, the rest of the codebase uses the value form.
+  // Refs that always point at the latest committed value. The updater
+  // forms below read from these instead of from a `useCallback` closure,
+  // which would capture the messages/assessment from the render in which
+  // the callback was created — so two `setMessages` calls in the same
+  // event handler would both see the same stale `prev`, and the second
+  // would clobber the first. (That bug dropped user turns and made the
+  // bot bubble appear "blank, no reply.")
+  const messagesRef = useRef(messages);
+  const assessmentRef = useRef(assessment);
+  useEffect(() => { messagesRef.current = messages; }, [messages]);
+  useEffect(() => { assessmentRef.current = assessment; }, [assessment]);
+
   const setMessages = useCallback(
     (next: Message[] | ((prev: Message[]) => Message[])) => {
-      patch({ messages: typeof next === "function" ? next(messages) : next });
+      patch({ messages: typeof next === "function" ? next(messagesRef.current) : next });
     },
-    [patch, messages]
+    [patch]
   );
   const setAssessment = useCallback(
     (next: Assessment | ((prev: Assessment) => Assessment)) => {
-      patch({ assessment: typeof next === "function" ? next(assessment) : next });
+      patch({ assessment: typeof next === "function" ? next(assessmentRef.current) : next });
     },
-    [patch, assessment]
+    [patch]
   );
   const setStage = useCallback((next: Stage) => patch({ stage: next }), [patch]);
   const setSessionId = useCallback((next: string) => patch({ sessionId: next }), [patch]);
@@ -281,16 +289,38 @@ export default function AuditChatbot() {
   async function sendMessage(text: string) {
     const userMsg = text.trim();
     if (!userMsg || isBotTyping) return;
-    const newMessages: Message[] = [...messages, { role: "user", content: userMsg, timestamp: getTimestamp() }];
-    setMessages(newMessages);
+    // Append the user bubble + empty bot placeholder in one write so the
+    // store sees them together. (Two separate setMessages calls used to
+    // race on the same closure of `messages` and silently drop the user
+    // turn — the bug behind "blank, no reply.")
+    const userBubble: Message = { role: "user", content: userMsg, timestamp: getTimestamp() };
+    const botBubble: Message = { role: "bot", content: "", timestamp: getTimestamp() };
+    const baseAfterUser: Message[] = [...messages, userBubble];
+    const baseAfterBot: Message[] = [...baseAfterUser, botBubble];
+    // Pin the bot bubble's index so the typewriter targets THIS bubble
+    // even if the user sends another turn before the animation finishes.
+    const botIndex = baseAfterBot.length - 1;
+    setMessages(baseAfterBot);
     setInput("");
     setIsBotTyping(true);
-    setMessages((prev) => [...prev, { role: "bot", content: "", timestamp: getTimestamp() }]);
     // Send the prior history (without the just-added user message). The
     // /api/chat route appends the new user turn itself.
     const historyForLlm = messages
       .filter((m) => m.role === "user" || m.role === "bot")
       .map((m) => ({ role: m.role === "bot" ? ("assistant" as const) : ("user" as const), content: m.content }));
+
+    // Helper: replace the pinned bot bubble in the freshest message list
+    // (read via the updater form, which now reads from messagesRef).
+    const updateBotBubble = (content: string) =>
+      setMessages((prev) => {
+        if (botIndex >= prev.length) return prev;
+        const target = prev[botIndex];
+        if (!target || target.role !== "bot") return prev;
+        const copy = [...prev];
+        copy[botIndex] = { ...target, content };
+        return copy;
+      });
+
     try {
       const result = await callChatApi(userMsg, assessment, historyForLlm);
       const { message: botText, assessment: updatedAssessment, sessionId: returnedSessionId } = result;
@@ -302,14 +332,7 @@ export default function AuditChatbot() {
       }
       setIsBotTyping(false);
       if (!botText) {
-        setMessages((prev) => {
-          const copy = [...prev];
-          const last = copy[copy.length - 1];
-          if (last && last.role === "bot") {
-            copy[copy.length - 1] = { ...last, content: "hmm, something broke on my end. try again?" };
-          }
-          return copy;
-        });
+        updateBotBubble("hmm, something broke on my end. try again?");
         return;
       }
       // Typewriter effect
@@ -317,26 +340,12 @@ export default function AuditChatbot() {
       const chunkSize = 3;
       const interval = setInterval(() => {
         i += chunkSize;
-        setMessages((prev) => {
-          const copy = [...prev];
-          const last = copy[copy.length - 1];
-          if (last && last.role === "bot") {
-            copy[copy.length - 1] = { ...last, content: botText.slice(0, i) };
-          }
-          return copy;
-        });
+        updateBotBubble(botText.slice(0, Math.min(i, botText.length)));
         if (i >= botText.length) clearInterval(interval);
       }, 12);
     } catch {
       setIsBotTyping(false);
-      setMessages((prev) => {
-        const copy = [...prev];
-        const last = copy[copy.length - 1];
-        if (last && last.role === "bot") {
-          copy[copy.length - 1] = { ...last, content: "connection issue — give it another go." };
-        }
-        return copy;
-      });
+      updateBotBubble("connection issue — give it another go.");
     }
   }
 
