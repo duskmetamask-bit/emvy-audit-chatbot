@@ -21,8 +21,11 @@ const BOOKING_URL = "https://emvyai.com/services/discovery-call";
 const CATEGORY_LABELS: Record<string, string> = {
   // Q1's "business basics" id isn't in the CATEGORIES spine — it only
   // shows up as currentCategory on turn 1. The fallback `id` in
-  // categoryLabel() would otherwise print raw snake_case.
+  // categoryLabel() would otherwise print raw snake_case. We also map
+  // the bare "business" string the LLM sometimes sends in its place —
+  // easier to alias it here than to fight the model for an exact id.
   business_basics: "Business basics",
+  business: "Business basics",
   lead_capture: "Lead capture",
   booking: "Booking & scheduling",
   comms: "Customer communication",
