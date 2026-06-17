@@ -119,8 +119,11 @@ export function parseChatResponse(raw: string, current: Assessment): ParsedChatR
   try {
     parsed = JSON.parse(json) as Record<string, unknown>;
   } catch {
-    // Malformed JSON inside the braces — fall back to prose.
-    const prose = cleaned.replace(/[{}]/g, " ").replace(/\s+/g, " ").trim();
+    // Malformed JSON inside the braces — fall back to prose. Keep
+    // braces intact: the LLM can legitimately emit curly quotes in
+    // the message body (e.g. "we use {xero}"), and clobbering them
+    // turns a parseable reply into gibberish.
+    const prose = cleaned.replace(/\s+/g, " ").trim();
     if (!prose) return null;
     return {
       message: prose,
@@ -211,7 +214,10 @@ export function parseChatResponse(raw: string, current: Assessment): ParsedChatR
   let currentQuestion: number | undefined;
   const cq = top.currentQuestion ?? a.currentQuestion;
   if (typeof cq === "number" && Number.isFinite(cq)) {
-    currentQuestion = Math.max(1, Math.min(13, Math.round(cq)));
+    // 20 = the audit-v4 cap: 13 spine questions + up to 7 follow-ups
+    // on a single category. The UI clamps the displayed number back
+    // down for the header chip.
+    currentQuestion = Math.max(1, Math.min(20, Math.round(cq)));
   }
   const currentCategory = asString(top.currentCategory) ?? asString(a.currentCategory);
 

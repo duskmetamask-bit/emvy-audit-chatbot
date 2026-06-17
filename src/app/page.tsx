@@ -7,7 +7,7 @@ import { EmvyLogo, EmvyWordmark } from "@/components/EmvyLogo";
 import { BuildTheater, BuildStage } from "@/components/BuildTheater";
 import { RoadmapSection } from "@/components/RoadmapSection";
 import { callConvexMutation, callConvexQuery } from "@/lib/convex";
-import { TOTAL_QUESTIONS } from "@/lib/agent";
+import { TOTAL_QUESTIONS, CATEGORIES } from "@/lib/agent";
 import {
   useAuditStore,
   type Message,
@@ -19,6 +19,10 @@ import {
 const BOOKING_URL = "https://emvyai.com/services/discovery-call";
 
 const CATEGORY_LABELS: Record<string, string> = {
+  // Q1's "business basics" id isn't in the CATEGORIES spine — it only
+  // shows up as currentCategory on turn 1. The fallback `id` in
+  // categoryLabel() would otherwise print raw snake_case.
+  business_basics: "Business basics",
   lead_capture: "Lead capture",
   booking: "Booking & scheduling",
   comms: "Customer communication",
@@ -259,9 +263,16 @@ export default function AuditChatbot() {
     return new Date().toTimeString().slice(0, 8);
   }
 
+  // Signal-based progress, not question-count based. The audit-v4 LLM
+  // can fold several categories into a single answer ("we run
+  // everything through HubSpot" → lead_capture + booking + comms
+  // covered in one turn), so the bar should jump on a fold, not creep
+  // linearly. The denominator is the spine length (12) so we never
+  // hit 100% from the question counter alone — categoriesCovered is
+  // the only signal that should land us at 100.
   const estimatedProgress = Math.min(
     100,
-    ((assessment.currentQuestion ?? assessment.categoriesCovered.length) / TOTAL_QUESTIONS) * 100
+    (assessment.categoriesCovered.length / CATEGORIES.length) * 100
   );
 
   async function callChatApi(
@@ -655,7 +666,7 @@ export default function AuditChatbot() {
             {stage === "chat" && (
               <span className="label-meta" style={{ color: "var(--text-secondary)" }}>
                 <span style={{ color: "var(--accent)", fontWeight: 500 }}>
-                  Question {Math.min(TOTAL_QUESTIONS, Math.max(0, assessment.currentQuestion ?? 0))} of {TOTAL_QUESTIONS}
+                  Area {Math.min(CATEGORIES.length, assessment.categoriesCovered.length)} of {CATEGORIES.length} covered
                 </span>{" "}
                 · {assessment.currentCategory ? categoryLabel(assessment.currentCategory) : "starting"}
               </span>
@@ -820,7 +831,7 @@ function WelcomeScreen({ onStart }: { onStart: () => void }) {
             animation: "fadeUp var(--motion-slow) var(--ease-out) 220ms forwards",
           }}
         >
-          Answer {TOTAL_QUESTIONS} short questions about how your business runs day to day.
+          Answer a few short questions about how your business runs day to day — around 5 minutes, give or take.
           Walk away with a personalised 30/60/90 day plan you can ship this week — built by EMVY, ready to action.
         </p>
 
@@ -987,7 +998,11 @@ function ChatStage({
   onGoToEmail: () => void;
   chatEndRef: React.RefObject<HTMLDivElement | null>;
 }) {
-  const questionNumber = Math.min(TOTAL_QUESTIONS, Math.max(1, assessment.currentQuestion ?? 0));
+  // Header chip shows how many spine categories we've covered, not the
+  // raw currentQuestion. A follow-up turn can push currentQuestion to
+  // 14-20 (audit-v4: up to 7 follow-ups per category) but the display
+  // is signal-based — same semantic as the progress bar.
+  const areasCovered = Math.min(CATEGORIES.length, assessment.categoriesCovered.length);
   const currentCategory = assessment.currentCategory
     ? categoryLabel(assessment.currentCategory)
     : "Getting started";
@@ -1097,7 +1112,7 @@ function ChatStage({
           >
             <span>Your answers stay private</span>
             <span style={{ color: "var(--accent)" }}>
-              Question {questionNumber} of {TOTAL_QUESTIONS} · {currentCategory}
+              Area {areasCovered} of {CATEGORIES.length} covered · {currentCategory}
             </span>
           </div>
         </div>

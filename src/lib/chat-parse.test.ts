@@ -133,13 +133,23 @@ describe("parseChatResponse", () => {
     expect(out!.message).toBe("hi");
   });
 
-  it("clamps currentQuestion to 1-13", () => {
+  it("clamps currentQuestion to 1-20 (13 spine + 7 follow-ups)", () => {
+    // audit-v4 widened the cap from 13 → 20 so follow-up turns (where
+    // the LLM digs deeper on a rich answer) don't get clamped back
+    // to the spine. The UI clamps the displayed number down for the
+    // header chip.
     const raw = JSON.stringify({ message: "q", currentQuestion: 99 });
-    expect(parseChatResponse(raw, current())!.currentQuestion).toBe(13);
+    expect(parseChatResponse(raw, current())!.currentQuestion).toBe(20);
     const raw2 = JSON.stringify({ message: "q", currentQuestion: -2 });
     expect(parseChatResponse(raw2, current())!.currentQuestion).toBe(1);
     const raw3 = JSON.stringify({ message: "q", currentQuestion: 7 });
     expect(parseChatResponse(raw3, current())!.currentQuestion).toBe(7);
+    // A follow-up turn (e.g. a second pass on the same category) lands
+    // in the 14-20 range and is preserved.
+    const raw4 = JSON.stringify({ message: "q", currentQuestion: 15 });
+    expect(parseChatResponse(raw4, current())!.currentQuestion).toBe(15);
+    const raw5 = JSON.stringify({ message: "q", currentQuestion: 20 });
+    expect(parseChatResponse(raw5, current())!.currentQuestion).toBe(20);
   });
 
   it("falls back to prose when no JSON is present", () => {

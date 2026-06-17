@@ -64,7 +64,10 @@ export async function POST(req: NextRequest) {
     const response = await chatCompletion({
       messages: agentMessages,
       temperature: 0.7,
-      maxTokens: 1024,
+      // Bumped from 1024 → 1500 for audit-v4: pattern-callout beats and
+      // one-clause reflections can run long. Still well under the model's
+      // 8k window — we just want the JSON envelope to land comfortably.
+      maxTokens: 1500,
     });
 
     const raw = response.choices?.[0]?.message?.content || "";
