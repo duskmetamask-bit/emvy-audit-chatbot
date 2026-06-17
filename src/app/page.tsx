@@ -643,8 +643,8 @@ export default function AuditChatbot() {
             }}
             aria-label="EMVY AI Mini Strategy"
           >
-            <EmvyWordmark height={48} />
-            <span style={{ color: "var(--text-muted)", fontSize: 22, fontWeight: 400, lineHeight: 1 }}>· Mini AI Strategy</span>
+            <EmvyWordmark height={64} />
+            <span style={{ color: "var(--text-muted)", fontSize: 20, fontWeight: 400, lineHeight: 1 }}>· Mini AI Strategy</span>
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 18 }}>
             {stage !== "welcome" && state.messages.length > 0 && (
