@@ -24,11 +24,11 @@ const jetbrainsMono = JetBrains_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "EMVY AI Audit | 30-day AI roadmap for your business",
+  title: "EMVY Mini AI Strategy Assessment | 30-day AI roadmap for your business",
   description:
     "Get a personalised 30/60/90 day AI roadmap in around 5 minutes. Free, no commitment, and the exact steps to remove manual work.",
   openGraph: {
-    title: "EMVY AI Audit | 30-day AI roadmap for your business",
+    title: "EMVY Mini AI Strategy Assessment | 30-day AI roadmap for your business",
     description:
       "Get a personalised 30/60/90 day AI roadmap in 5 minutes. Free, no commitment.",
     type: "website",

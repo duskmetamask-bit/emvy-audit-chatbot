@@ -69,7 +69,7 @@ export async function POST(req: NextRequest) {
   const html = `
     <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; line-height: 1.55; color: #0A1118; max-width: 560px;">
       <p style="margin: 0 0 12px;">Hi ${escapeHtml(body.lead.name || "there")},</p>
-      <p style="margin: 0 0 12px;">Thanks for running the EMVY Mini AI Audit. Your personalised 30/60/90 day roadmap is attached.</p>
+      <p style="margin: 0 0 12px;">Thanks for running the EMVY Mini AI Strategy Assessment. Your personalised 30/60/90 day roadmap is attached.</p>
       ${scoreLine ? `<p style="margin: 0 0 12px;"><strong>${escapeHtml(scoreLine)}</strong></p>` : ""}
       <p style="margin: 0 0 12px;">${escapeHtml(body.report.summary || "")}</p>
       <p style="margin: 0 0 12px;">If you want help shipping any of these, grab a free 15-min slot: <a href="https://emvyai.com/services/discovery-call">emvyai.com/services/discovery-call</a>.</p>
@@ -79,7 +79,7 @@ export async function POST(req: NextRequest) {
 
   const text =
     `Hi ${body.lead.name || "there"},\n\n` +
-    `Thanks for running the EMVY Mini AI Audit. Your personalised 30/60/90 day roadmap is attached.\n\n` +
+    `Thanks for running the EMVY Mini AI Strategy Assessment. Your personalised 30/60/90 day roadmap is attached.\n\n` +
     (scoreLine ? `${scoreLine}\n\n` : "") +
     `${body.report.summary || ""}\n\n` +
     `If you want help shipping any of these, grab a free 15-min slot: https://emvyai.com/services/discovery-call\n\n` +

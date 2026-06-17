@@ -854,7 +854,15 @@ function WelcomeScreen({ onStart }: { onStart: () => void }) {
               <path d="M2 7H12M8 3L12 7L8 11" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
             </svg>
           </button>
-          <span className="label-meta">No card · No spam · No follow-up unless you ask</span>
+          <a
+            href="https://emvyai.com/services/ai-strategy-call"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="label-link"
+            style={{ fontSize: 13 }}
+          >
+            Want the full strategy? $500 AI Strategy →
+          </a>
         </div>
       </div>
 
@@ -1145,7 +1153,7 @@ function ChatBubble({ msg, isBotTyping, isLast }: { msg: Message; isBotTyping: b
           }}
         >
           <EmvyLogo size={14} />
-          <span className="label-eyebrow-accent" style={{ fontSize: 10 }}>EMVY</span>
+          <span className="label-eyebrow-accent" style={{ fontSize: 10 }}>EMVY · Mini AI Strategy</span>
         </div>
       )}
       <div className={isUser ? "message-user" : "message-bot"}>
@@ -1340,7 +1348,7 @@ function ReportStage({
       >
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
           <EmvyLogo size={20} />
-          <span className="label-eyebrow-accent">EMVY · AI Audit</span>
+          <span className="label-eyebrow-accent">EMVY · Mini AI Strategy Assessment</span>
         </div>
         <h1
           style={{

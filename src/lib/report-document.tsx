@@ -323,7 +323,7 @@ export function ReportDocument({ report, lead }: { report: ReportData; lead: Rep
   return React.createElement(
     Document,
     {
-      title: `EMVY AI Audit — ${report.businessName}`,
+      title: `EMVY Mini AI Strategy Assessment — ${report.businessName}`,
       author: "EMVY AI",
       subject: "30/60/90 AI Roadmap",
     },
@@ -335,7 +335,7 @@ export function ReportDocument({ report, lead }: { report: ReportData; lead: Rep
         View,
         { style: styles.coverBrand },
         React.createElement(MVMark, { size: 16 }),
-        React.createElement(Text, { style: styles.coverBrandText }, "EMVY · AI AUDIT")
+        React.createElement(Text, { style: styles.coverBrandText }, "EMVY · MINI AI STRATEGY ASSESSMENT")
       ),
       React.createElement(Text, { style: styles.coverEyebrow }, "30/60/90 Roadmap"),
       React.createElement(
@@ -409,7 +409,7 @@ export function ReportDocument({ report, lead }: { report: ReportData; lead: Rep
       React.createElement(
         View,
         { style: styles.footer, fixed: true },
-        React.createElement(Text, {}, `EMVY AI Audit  ·  ${lead.email}`),
+        React.createElement(Text, {}, `EMVY Mini AI Strategy Assessment  ·  ${lead.email}`),
         React.createElement(Text, {}, `Page 1  ·  ${date}`)
       )
     )

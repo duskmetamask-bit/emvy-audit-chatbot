@@ -37,7 +37,7 @@ export function BuildTheater({ stages, businessName }: BuildTheaterProps) {
         }}
       >
         <EmvyLogo size={20} />
-        <span className="label-eyebrow-accent">EMVY · Generating</span>
+        <span className="label-eyebrow-accent">EMVY · Building your roadmap</span>
       </div>
 
       <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
