@@ -641,10 +641,10 @@ export default function AuditChatbot() {
               gap: 14,
               color: "inherit",
             }}
-            aria-label="EMVY AI Mini Audit"
+            aria-label="EMVY AI Mini Strategy"
           >
             <EmvyWordmark height={48} />
-            <span style={{ color: "var(--text-muted)", fontSize: 22, fontWeight: 400, lineHeight: 1 }}>· AI Mini Audit</span>
+            <span style={{ color: "var(--text-muted)", fontSize: 22, fontWeight: 400, lineHeight: 1 }}>· Mini AI Strategy</span>
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 18 }}>
             {stage !== "welcome" && state.messages.length > 0 && (
