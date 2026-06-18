@@ -1,22 +1,20 @@
 import { describe, it, expect } from "vitest";
-import { AUDIT_SYSTEM_PROMPT, CATEGORIES, TOTAL_QUESTIONS, emptyAssessment } from "./agent";
+import { AUDIT_SYSTEM_PROMPT, QUESTIONS, REPORT_SYSTEM_PROMPT, TOTAL_QUESTIONS, emptyAssessment } from "./agent";
 
 describe("AUDIT_SYSTEM_PROMPT", () => {
-  it("numbers the 13-question spine", () => {
-    // The audit-v4 prompt keeps Q1–Q13 as the default order. Adaptive
-    // skipping + follow-ups let the LLM take 10-16 turns instead, but
-    // the spine is still 13. Don't pin the literal count in copy that
-    // says "around 5 minutes" — just check the numbered list is there.
-    for (let i = 1; i <= 13; i++) {
+  it("numbers the 10-question spine", () => {
+    // The v2 prompt keeps Q1–Q10 as the default order. Adaptive skipping
+    // + follow-ups let the LLM take more turns, but the spine is 10.
+    for (let i = 1; i <= 10; i++) {
       expect(AUDIT_SYSTEM_PROMPT).toMatch(new RegExp(`\\b${i}\\.`));
     }
   });
 
   it("instructs the model not to emit think blocks", () => {
     // The prompt must explicitly tell the model to skip think/reasoning
-    // blocks in its response. Check for the literal <think> tag reference
+    // blocks in its response. Check for the literal think tag reference
     // and a directive against chain-of-thought.
-    expect(AUDIT_SYSTEM_PROMPT).toContain("<think>");
+    expect(AUDIT_SYSTEM_PROMPT).toContain("think");
     const lower = AUDIT_SYSTEM_PROMPT.toLowerCase();
     expect(lower).toContain("chain-of-thought");
     expect(lower).toContain("reasoning");
@@ -34,9 +32,7 @@ describe("AUDIT_SYSTEM_PROMPT", () => {
 
   it("provides a rotation pool of reaction beats", () => {
     // The opener pool is what stops the model defaulting to "cool" / "right"
-    // on every turn. The audit-v4 prompt adds pattern-callout beats on top
-    // of the original short-phrase pool, so we expect at least 8 distinct
-    // shapes now.
+    // on every turn. Keep at least 8 distinct shapes.
     const lower = AUDIT_SYSTEM_PROMPT.toLowerCase();
     const beats = ["cool", "right", "got it", "fair", "noted", "yep", "mm", "makes sense"];
     const found = beats.filter((b) => lower.includes(b));
@@ -57,16 +53,8 @@ describe("AUDIT_SYSTEM_PROMPT", () => {
     expect(lower).toMatch(/sparingly|use.*(?:once|rare)|max.*(?:once|3|4)/);
   });
 
-  it("documents adaptive question selection (skip / acknowledge)", () => {
-    const lower = AUDIT_SYSTEM_PROMPT.toLowerCase();
-    expect(lower).toMatch(/adaptive/);
-    expect(lower).toContain("skip");
-    expect(lower).toContain("acknowledge");
-    expect(lower).toContain("categoriescovered");
-  });
-
   it("allows free-form follow-ups on rich answers", () => {
-    // The audit-v4 agency: when an answer is rich, the LLM may ask ONE
+    // The audit agency: when an answer is rich, the LLM may ask ONE
     // short follow-up before moving on. Follow-ups do NOT advance
     // currentQuestion.
     const lower = AUDIT_SYSTEM_PROMPT.toLowerCase();
@@ -77,57 +65,77 @@ describe("AUDIT_SYSTEM_PROMPT", () => {
   it("sets readyForEmail on the wrap condition", () => {
     const lower = AUDIT_SYSTEM_PROMPT.toLowerCase();
     expect(lower).toContain("readyforemail");
-    expect(lower).toMatch(/8.*categor|signal on|categories covered/);
+    expect(lower).toMatch(/8.*(?:signal|answer|substantive)|signal on|questions? covered/);
   });
 
-  it("forbids backtracking to covered categories", () => {
+  it("forbids backtracking to covered topics", () => {
     // The audit is one-way. If a user volunteers info about a covered
-    // category later, fold it into findings — never ask twice.
+    // topic later, fold it into findings — never ask twice.
     const lower = AUDIT_SYSTEM_PROMPT.toLowerCase();
     expect(lower).toMatch(/no backtrack|never revisit|one-way/);
   });
-
-  it("instructs the model to trust the injected running assessment", () => {
-    // The route injects `CURRENT_RUNNING_ASSESSMENT` every turn. The
-    // prompt must reference it so the model reads prior state from
-    // there instead of inventing it.
-    expect(AUDIT_SYSTEM_PROMPT).toContain("CURRENT_RUNNING_ASSESSMENT");
-  });
 });
 
-describe("CATEGORIES", () => {
-  it("has 12 categories (10 original + tools + goal)", () => {
-    expect(CATEGORIES).toHaveLength(12);
+describe("QUESTIONS", () => {
+  it("has 10 questions numbered 1–10", () => {
+    expect(QUESTIONS).toHaveLength(10);
+    expect(QUESTIONS.map((q) => q.id)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
   });
 
-  it("includes the new tools and goal categories", () => {
-    const ids = CATEGORIES.map((c) => c.id);
-    expect(ids).toContain("tools");
-    expect(ids).toContain("goal");
+  it("each question has a prompt and an intent", () => {
+    for (const q of QUESTIONS) {
+      expect(q.prompt.length).toBeGreaterThan(10);
+      expect(q.intent.length).toBeGreaterThan(10);
+    }
   });
 });
 
 describe("TOTAL_QUESTIONS", () => {
-  it("is 13", () => {
-    expect(TOTAL_QUESTIONS).toBe(13);
+  it("matches QUESTIONS.length", () => {
+    expect(TOTAL_QUESTIONS).toBe(QUESTIONS.length);
+    expect(TOTAL_QUESTIONS).toBe(10);
   });
 });
 
 describe("emptyAssessment", () => {
-  it("starts at question 0 with no current category", () => {
+  it("starts at question 0", () => {
     const a = emptyAssessment();
     expect(a.currentQuestion).toBe(0);
-    expect(a.currentCategory).toBeUndefined();
   });
 
   it("starts with empty arrays and false flags", () => {
     const a = emptyAssessment();
-    expect(a.scores).toEqual({});
     expect(a.findings).toEqual([]);
     expect(a.painPoints).toEqual([]);
     expect(a.manualTasks).toEqual([]);
-    expect(a.categoriesCovered).toEqual([]);
     expect(a.messageCount).toBe(0);
     expect(a.readyForEmail).toBe(false);
+  });
+});
+
+describe("REPORT_SYSTEM_PROMPT", () => {
+  it("requires the 5-section envelope shape", () => {
+    // The v2 report is: summary, opportunities, quickWin, first90Days, nextStep.
+    for (const key of ["summary", "opportunities", "quickWin", "first90Days", "nextStep"]) {
+      expect(REPORT_SYSTEM_PROMPT).toContain(`"${key}"`);
+    }
+  });
+
+  it("requires exactly 3 opportunities, each with 4 sub-fields", () => {
+    expect(REPORT_SYSTEM_PROMPT).toContain("Exactly 3 opportunities");
+    for (const key of ["whatItIs", "whyMatters", "whatChanges", "howFast"]) {
+      expect(REPORT_SYSTEM_PROMPT).toContain(`"${key}"`);
+    }
+  });
+
+  it("specifies the 3 first90Days phases in order", () => {
+    expect(REPORT_SYSTEM_PROMPT).toContain("First 30 days");
+    expect(REPORT_SYSTEM_PROMPT).toContain("Next 30 days");
+    expect(REPORT_SYSTEM_PROMPT).toContain("Days 60-90");
+  });
+
+  it("lets the LLM pick between EMVY CTA and honest 'come back when'", () => {
+    expect(REPORT_SYSTEM_PROMPT).toContain("come back when");
+    expect(REPORT_SYSTEM_PROMPT).toContain("discovery call");
   });
 });

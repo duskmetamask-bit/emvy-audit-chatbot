@@ -1,7 +1,24 @@
-// /api/send-report — emails the personalised 30/60/90 PDF to the lead via
-// Resend. Called from the client right after the on-screen report lands.
-// The PDF is rendered with the same ReportDocument used by /api/report-pdf
-// so the downloaded and emailed copies are byte-for-byte identical.
+// /api/send-report — emails the personalised AI strategy PDF to the lead
+// via Resend. Called from the client right after the on-screen report
+// lands. The PDF is rendered with the same ReportDocument used by
+// /api/report-pdf so the downloaded and emailed copies are byte-for-byte
+// identical.
+//
+// v2 (2026-06-18): switched from inline html/text to Resend's hosted
+// Templates feature. The template (footer PNG + "— Jake" signature +
+// greeting/summary copy) lives in the Resend dashboard. This route
+// passes the template ID + dynamic variables + the PDF attachment.
+//
+// Required template variables (handlebars-style):
+//   {{name}}          — lead's first name
+//   {{businessName}}  — from the report
+//   {{summary}}       — 2-3 sentence strategy summary
+//   {{filename}}      — slug for the PDF attachment name
+//
+// To set the template ID:
+//   1. Create the template in the Resend dashboard with the variables above.
+//   2. Add the template's ID to Vercel env as RESEND_REPORT_TEMPLATE_ID.
+//   3. Redeploy. /api/send-report will then use it on the next send.
 
 import { NextRequest } from "next/server";
 import React from "react";
@@ -38,6 +55,12 @@ export async function POST(req: NextRequest) {
     return json({ error: "Email service not configured" }, 500);
   }
 
+  const templateId = process.env.RESEND_REPORT_TEMPLATE_ID;
+  if (!templateId) {
+    console.error("[/api/send-report] RESEND_REPORT_TEMPLATE_ID not set");
+    return json({ error: "Email template not configured" }, 500);
+  }
+
   let pdfBuffer: Buffer;
   try {
     const element = React.createElement(ReportDocument, {
@@ -59,31 +82,8 @@ export async function POST(req: NextRequest) {
   const filename = `emvy-roadmap-${slug}.pdf`;
 
   const subject = body.report.businessName
-    ? `Your ${body.report.businessName} AI roadmap`
-    : "Your EMVY AI roadmap";
-
-  const scoreLine = body.report.score
-    ? `Your AI readiness score: ${body.report.score}/100 (${body.report.scoreLabel}).`
-    : "";
-
-  const html = `
-    <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; line-height: 1.55; color: #0A1118; max-width: 560px;">
-      <p style="margin: 0 0 12px;">Hi ${escapeHtml(body.lead.name || "there")},</p>
-      <p style="margin: 0 0 12px;">Thanks for running the EMVY Mini AI Strategy Assessment. Your personalised 30/60/90 day roadmap is attached.</p>
-      ${scoreLine ? `<p style="margin: 0 0 12px;"><strong>${escapeHtml(scoreLine)}</strong></p>` : ""}
-      <p style="margin: 0 0 12px;">${escapeHtml(body.report.summary || "")}</p>
-      <p style="margin: 0 0 12px;">If you want help shipping any of these, grab a free 15-min slot: <a href="https://emvyai.com/services/discovery-call">emvyai.com/services/discovery-call</a>.</p>
-      <p style="margin: 24px 0 0; color: #6B6B70; font-size: 13px;">— The EMVY team</p>
-    </div>
-  `;
-
-  const text =
-    `Hi ${body.lead.name || "there"},\n\n` +
-    `Thanks for running the EMVY Mini AI Strategy Assessment. Your personalised 30/60/90 day roadmap is attached.\n\n` +
-    (scoreLine ? `${scoreLine}\n\n` : "") +
-    `${body.report.summary || ""}\n\n` +
-    `If you want help shipping any of these, grab a free 15-min slot: https://emvyai.com/services/discovery-call\n\n` +
-    `— The EMVY team\n`;
+    ? `Your ${body.report.businessName} AI strategy report`
+    : "Your EMVY AI strategy report";
 
   try {
     const resend = new Resend(apiKey);
@@ -91,8 +91,15 @@ export async function POST(req: NextRequest) {
       from: FROM_ADDRESS,
       to: [body.lead.email],
       subject,
-      html,
-      text,
+      template: {
+        id: templateId,
+        variables: {
+          name: body.lead.name,
+          businessName: body.report.businessName,
+          summary: body.report.summary,
+          filename,
+        },
+      },
       attachments: [
         {
           filename,
@@ -119,13 +126,4 @@ function json(body: unknown, status = 200): Response {
     status,
     headers: { "Content-Type": "application/json" },
   });
-}
-
-function escapeHtml(s: string): string {
-  return s
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#39;");
 }

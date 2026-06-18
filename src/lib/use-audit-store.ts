@@ -9,6 +9,11 @@
 // untouched and the `:create` / SSE / Resend flows only re-fire when the
 // persisted state says they should.
 //
+// v2 (2026-06-18): the report shape changed (no more findings/severity;
+// instead 3 opportunities + quickWin + first90Days). Assessment dropped
+// scores / categoriesCovered / currentCategory / budget / obstacles. Old
+// v1 keys on disk fail the new validators and are treated as EMPTY.
+//
 // Hand-rolled validators instead of Zod: the audit chatbot's package tree
 // does not declare zod as a runtime dependency, and this slice does not
 // justify adding one. Each invalid input shape returns `null` from
@@ -16,8 +21,8 @@
 
 import { useCallback, useSyncExternalStore } from "react";
 
-const STORAGE_KEY = "emvy-audit-state:v1";
-const STORAGE_VERSION = 1 as const;
+const STORAGE_KEY = "emvy-audit-state:v2";
+const STORAGE_VERSION = 2 as const;
 
 export type Stage = "welcome" | "chat" | "email" | "building" | "report";
 
@@ -32,37 +37,42 @@ export interface Assessment {
   businessName?: string;
   businessDescription?: string;
   teamSize?: string;
-  scores: Record<string, number>;
-  findings: Array<{ category: string; text: string; severity: "high" | "medium" | "low" }>;
+  industry?: string;
+  findings: Array<{ category: string; text: string }>;
   painPoints: string[];
   manualTasks: string[];
   aiTools?: string;
-  budget?: string;
   goal?: string;
-  obstacles?: string;
-  industry?: string;
   messageCount: number;
-  categoriesCovered: string[];
   readyForEmail: boolean;
   currentQuestion?: number;
-  currentCategory?: string;
+}
+
+export interface ReportOpportunity {
+  title: string;
+  whatItIs: string;
+  whyMatters: string;
+  whatChanges: string;
+  howFast: string;
+}
+
+export interface ReportPhase {
+  title: string;
+  actions: string[];
 }
 
 export interface ReportData {
-  score: number;
-  scoreLabel: string;
-  scoreBlurb: string;
   businessName: string;
   industry: string;
   summary: string;
-  week1: string[];
-  weeks24: string[];
-  months23: string[];
+  opportunities: ReportOpportunity[];
+  quickWin: string;
+  first90Days: ReportPhase[];
   nextStep: string;
 }
 
 export interface AuditState {
-  version: 1;
+  version: 2;
   stage: Stage;
   messages: Message[];
   assessment: Assessment;
@@ -82,12 +92,10 @@ export const EMPTY_AUDIT_STATE: AuditState = Object.freeze({
   stage: "welcome",
   messages: [],
   assessment: {
-    scores: {},
     findings: [],
     painPoints: [],
     manualTasks: [],
     messageCount: 0,
-    categoriesCovered: [],
     readyForEmail: false,
     currentQuestion: 0,
   },
@@ -138,11 +146,6 @@ function isRole(v: unknown): v is "bot" | "user" {
   return typeof v === "string" && (ROLES as readonly string[]).includes(v);
 }
 
-const SEVERITIES = ["high", "medium", "low"] as const;
-function isSeverity(v: unknown): v is "high" | "medium" | "low" {
-  return typeof v === "string" && (SEVERITIES as readonly string[]).includes(v);
-}
-
 function isMessage(v: unknown): v is Message {
   if (!isObject(v)) return false;
   if (!isRole(v.role)) return false;
@@ -156,15 +159,6 @@ function isFinding(v: unknown): v is Assessment["findings"][number] {
   if (!isObject(v)) return false;
   if (!isString(v.category)) return false;
   if (!isString(v.text)) return false;
-  if (!isSeverity(v.severity)) return false;
-  return true;
-}
-
-function isScoreRecord(v: unknown): v is Record<string, number> {
-  if (!isObject(v)) return false;
-  for (const score of Object.values(v)) {
-    if (!isNumber(score) || !Number.isInteger(score) || score < 0 || score > 5) return false;
-  }
   return true;
 }
 
@@ -176,44 +170,52 @@ function isAssessment(v: unknown): v is Assessment {
     "teamSize",
     "industry",
     "aiTools",
-    "budget",
     "goal",
-    "obstacles",
   ] as const) {
     if (v[opt] !== undefined && !isString(v[opt])) return false;
   }
-  if (!isScoreRecord(v.scores)) return false;
   if (!isArrayOf(v.findings, isFinding)) return false;
   if (!isStringArray(v.painPoints)) return false;
   if (!isStringArray(v.manualTasks)) return false;
   if (!isNumber(v.messageCount) || !Number.isInteger(v.messageCount) || v.messageCount < 0) return false;
-  if (!isStringArray(v.categoriesCovered)) return false;
   if (!isBoolean(v.readyForEmail)) return false;
   if (v.currentQuestion !== undefined) {
     if (
       !isNumber(v.currentQuestion) ||
       !Number.isInteger(v.currentQuestion) ||
       v.currentQuestion < 0 ||
-      v.currentQuestion > 13
+      v.currentQuestion > 10
     ) {
       return false;
     }
   }
-  if (v.currentCategory !== undefined && !isString(v.currentCategory)) return false;
   return true;
+}
+
+function isOpportunity(v: unknown): v is ReportOpportunity {
+  if (!isObject(v)) return false;
+  return (
+    isString(v.title) &&
+    isString(v.whatItIs) &&
+    isString(v.whyMatters) &&
+    isString(v.whatChanges) &&
+    isString(v.howFast)
+  );
+}
+
+function isReportPhase(v: unknown): v is ReportPhase {
+  if (!isObject(v)) return false;
+  return isString(v.title) && isStringArray(v.actions);
 }
 
 function isReportData(v: unknown): v is ReportData {
   if (!isObject(v)) return false;
-  if (!isNumber(v.score) || !Number.isInteger(v.score) || v.score < 0 || v.score > 100) return false;
-  if (!isString(v.scoreLabel)) return false;
-  if (!isString(v.scoreBlurb)) return false;
   if (!isString(v.businessName)) return false;
   if (!isString(v.industry)) return false;
   if (!isString(v.summary)) return false;
-  if (!isStringArray(v.week1)) return false;
-  if (!isStringArray(v.weeks24)) return false;
-  if (!isStringArray(v.months23)) return false;
+  if (!isArrayOf(v.opportunities, isOpportunity)) return false;
+  if (!isString(v.quickWin)) return false;
+  if (!isArrayOf(v.first90Days, isReportPhase)) return false;
   if (!isString(v.nextStep)) return false;
   return true;
 }

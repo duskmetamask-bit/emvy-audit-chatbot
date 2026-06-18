@@ -1,7 +1,12 @@
-// Shared PDF document for the audit report. Imported by /api/report-pdf
+// Shared PDF document for the AI strategy report. Imported by /api/report-pdf
 // (which serves the PDF for download) and /api/send-report (which emails
 // it via Resend). Keeping the React tree in one place means a styling
 // change shows up in both the downloaded PDF and the emailed copy.
+//
+// v2 (2026-06-18): report shape changed. Now renders 5 sections —
+// cover (eyebrow + businessName + summary), 3 OpportunityCards, Quick
+// Win callout, 3 PhaseBlocks, closing nextStep. No findings block, no
+// hardcoded dark CTA at the bottom (the LLM's `nextStep` is the closer).
 
 import React from "react";
 import {
@@ -14,16 +19,26 @@ import {
   Path,
 } from "@react-pdf/renderer";
 
+export interface ReportOpportunity {
+  title: string;
+  whatItIs: string;
+  whyMatters: string;
+  whatChanges: string;
+  howFast: string;
+}
+
+export interface ReportPhase {
+  title: string;
+  actions: string[];
+}
+
 export interface ReportData {
-  score: number;
-  scoreLabel: string;
-  scoreBlurb: string;
   businessName: string;
   industry: string;
   summary: string;
-  week1: string[];
-  weeks24: string[];
-  months23: string[];
+  opportunities: ReportOpportunity[];
+  quickWin: string;
+  first90Days: ReportPhase[];
   nextStep: string;
 }
 
@@ -39,21 +54,15 @@ const COLORS = {
   text: "#1A1A1A",
   textSecondary: "#4A4A4F",
   textMuted: "#6B6B70",
-  accent: "#56D9FF",
+  accent: "#00E5FF",
   accentInk: "#06121A",
-  accentDim: "rgba(86, 217, 255, 0.10)",
+  accentDim: "rgba(0, 229, 255, 0.10)",
   surface: "#F2F4F7",
   surfaceDark: "#0A1118",
   border: "#E5E5E5",
   onDark: "#F4F6F8",
   onDarkMuted: "#B6BEC9",
 };
-
-function scoreColor(score: number): string {
-  if (score >= 70) return "#1B8A5A";
-  if (score >= 40) return "#0891B2";
-  return "#E85D04";
-}
 
 function formatDate(): string {
   return new Date().toLocaleDateString("en-AU", { day: "numeric", month: "long", year: "numeric" });
@@ -113,7 +122,7 @@ const styles = StyleSheet.create({
     lineHeight: 1.55,
     color: COLORS.textSecondary,
     marginTop: 10,
-    maxWidth: 380,
+    maxWidth: 460,
   },
   coverMeta: {
     fontSize: 8.5,
@@ -127,75 +136,102 @@ const styles = StyleSheet.create({
     marginTop: 14,
     marginBottom: 24,
   },
-  scoreBlock: {
-    backgroundColor: COLORS.surface,
-    padding: 18,
-    marginBottom: 22,
-    flexDirection: "row",
-    alignItems: "center",
+
+  // Opportunities
+  opportunityBlock: {
+    paddingTop: 14,
+    paddingBottom: 14,
+    borderTopWidth: 0.5,
+    borderTopColor: "#E5E5E5",
   },
-  scoreNum: {
-    fontSize: 56,
-    fontFamily: "Helvetica-Bold",
-    letterSpacing: -1.8,
-    lineHeight: 1,
+  opportunityFirst: {
+    borderTopWidth: 0,
+    paddingTop: 0,
   },
-  scoreSuffix: {
-    fontSize: 14,
-    fontFamily: "Helvetica",
-    color: COLORS.textMuted,
-    marginTop: 8,
-    marginLeft: 3,
-  },
-  scoreSide: {
-    marginLeft: 22,
-    flex: 1,
-  },
-  scoreLabel: {
-    fontSize: 12,
-    fontFamily: "Helvetica-Bold",
-    color: COLORS.ink,
-    marginBottom: 2,
-  },
-  scoreBlurb: {
-    fontSize: 9.5,
-    lineHeight: 1.5,
-    color: COLORS.textSecondary,
-  },
-  section: {
-    marginBottom: 16,
-    paddingBottom: 4,
-  },
-  sectionHeader: {
-    flexDirection: "row",
-    alignItems: "baseline",
-    gap: 8,
-    marginBottom: 10,
-  },
-  sectionEyebrow: {
-    fontSize: 8.5,
+  opportunityIndex: {
+    fontSize: 9,
     fontFamily: "Helvetica-Bold",
     letterSpacing: 1.4,
     color: COLORS.accent,
-    textTransform: "uppercase",
+    marginBottom: 4,
   },
-  sectionMeta: {
-    fontSize: 8,
-    color: COLORS.textMuted,
-    fontFamily: "Courier",
-  },
-  sectionTitle: {
+  opportunityTitle: {
     fontSize: 16,
     fontFamily: "Helvetica-Bold",
     letterSpacing: -0.3,
     lineHeight: 1.2,
     color: COLORS.ink,
-    marginBottom: 10,
+    marginBottom: 12,
+  },
+  oppRow: {
+    flexDirection: "row",
+    marginBottom: 6,
+    alignItems: "flex-start",
+  },
+  oppLabel: {
+    width: 96,
+    fontSize: 8.5,
+    fontFamily: "Helvetica-Bold",
+    letterSpacing: 1.2,
+    color: COLORS.textMuted,
+    textTransform: "uppercase",
+    paddingTop: 2,
+  },
+  oppValue: {
+    flex: 1,
+    fontSize: 10.5,
+    lineHeight: 1.55,
+    color: COLORS.text,
+  },
+
+  // Quick win callout
+  quickWinBlock: {
+    backgroundColor: COLORS.accentDim,
+    padding: 18,
+    marginTop: 22,
+    marginBottom: 22,
+    borderLeftWidth: 3,
+    borderLeftColor: COLORS.accent,
+  },
+  quickWinEyebrow: {
+    fontSize: 8.5,
+    fontFamily: "Helvetica-Bold",
+    letterSpacing: 1.4,
+    color: COLORS.accent,
+    textTransform: "uppercase",
+    marginBottom: 8,
+  },
+  quickWinBody: {
+    fontSize: 12,
+    lineHeight: 1.5,
+    color: COLORS.ink,
+  },
+
+  // Phases
+  phaseBlock: {
+    marginBottom: 18,
+  },
+  phaseHeader: {
+    marginBottom: 8,
+  },
+  phaseEyebrow: {
+    fontSize: 8.5,
+    fontFamily: "Helvetica-Bold",
+    letterSpacing: 1.4,
+    color: COLORS.accent,
+    textTransform: "uppercase",
+    marginBottom: 4,
+  },
+  phaseTitle: {
+    fontSize: 14,
+    fontFamily: "Helvetica-Bold",
+    color: COLORS.ink,
+    letterSpacing: -0.2,
   },
   action: {
     flexDirection: "row",
-    paddingTop: 6,
-    paddingBottom: 6,
+    paddingTop: 5,
+    paddingBottom: 5,
     borderTopWidth: 0.5,
     borderTopColor: "#EFEFEF",
     alignItems: "flex-start",
@@ -216,13 +252,17 @@ const styles = StyleSheet.create({
     color: COLORS.text,
     flex: 1,
   },
-  ctaBlock: {
-    backgroundColor: COLORS.surfaceDark,
-    padding: 20,
+
+  // Closer (nextStep)
+  closerBlock: {
     marginTop: 8,
     marginBottom: 12,
+    paddingTop: 18,
+    paddingBottom: 18,
+    borderTopWidth: 2,
+    borderTopColor: COLORS.ink,
   },
-  ctaEyebrow: {
+  closerEyebrow: {
     fontSize: 8.5,
     fontFamily: "Helvetica-Bold",
     letterSpacing: 1.4,
@@ -230,35 +270,13 @@ const styles = StyleSheet.create({
     textTransform: "uppercase",
     marginBottom: 6,
   },
-  ctaTitle: {
-    fontSize: 17,
-    fontFamily: "Helvetica-Bold",
-    color: COLORS.onDark,
-    lineHeight: 1.2,
-    marginBottom: 6,
+  closerBody: {
+    fontSize: 13,
+    lineHeight: 1.5,
+    color: COLORS.ink,
   },
-  ctaBody: {
-    fontSize: 10,
-    lineHeight: 1.55,
-    color: COLORS.onDarkMuted,
-    marginBottom: 12,
-    maxWidth: 400,
-  },
-  ctaBtn: {
-    backgroundColor: COLORS.accent,
-    color: COLORS.accentInk,
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    fontSize: 10,
-    fontFamily: "Helvetica-Bold",
-    alignSelf: "flex-start",
-  },
-  ctaFine: {
-    fontSize: 8,
-    fontFamily: "Courier",
-    color: COLORS.textMuted,
-    marginTop: 12,
-  },
+
+  // Footer
   footer: {
     position: "absolute",
     bottom: 16,
@@ -286,26 +304,60 @@ function MVMark({ size = 14, color = COLORS.accent }: { size?: number; color?: s
   );
 }
 
-function RoadmapSection({
-  eyebrow,
-  title,
-  actions,
-}: {
-  eyebrow: string;
-  title: string;
-  actions: string[];
-}) {
+function OpportunityCard({ opportunity, index }: { opportunity: ReportOpportunity; index: number }) {
+  const isFirst = index === 0;
   return React.createElement(
     View,
-    { style: styles.section },
+    { style: [styles.opportunityBlock, isFirst ? styles.opportunityFirst : {}] },
+    React.createElement(Text, { style: styles.opportunityIndex }, `OPPORTUNITY 0${index + 1}`),
+    React.createElement(Text, { style: styles.opportunityTitle }, opportunity.title),
     React.createElement(
       View,
-      { style: styles.sectionHeader },
-      React.createElement(Text, { style: styles.sectionEyebrow }, eyebrow),
-      React.createElement(Text, { style: styles.sectionMeta }, `· ${actions.length} actions`)
+      { style: styles.oppRow },
+      React.createElement(Text, { style: styles.oppLabel }, "What it is"),
+      React.createElement(Text, { style: styles.oppValue }, opportunity.whatItIs)
     ),
-    React.createElement(Text, { style: styles.sectionTitle }, title),
-    ...actions.map((a, i) =>
+    React.createElement(
+      View,
+      { style: styles.oppRow },
+      React.createElement(Text, { style: styles.oppLabel }, "Why it matters"),
+      React.createElement(Text, { style: styles.oppValue }, opportunity.whyMatters)
+    ),
+    React.createElement(
+      View,
+      { style: styles.oppRow },
+      React.createElement(Text, { style: styles.oppLabel }, "What changes"),
+      React.createElement(Text, { style: styles.oppValue }, opportunity.whatChanges)
+    ),
+    React.createElement(
+      View,
+      { style: styles.oppRow },
+      React.createElement(Text, { style: styles.oppLabel }, "How fast"),
+      React.createElement(Text, { style: styles.oppValue }, opportunity.howFast)
+    )
+  );
+}
+
+function QuickWinCallout({ quickWin }: { quickWin: string }) {
+  return React.createElement(
+    View,
+    { style: styles.quickWinBlock },
+    React.createElement(Text, { style: styles.quickWinEyebrow }, "Your quick win — this week"),
+    React.createElement(Text, { style: styles.quickWinBody }, quickWin)
+  );
+}
+
+function PhaseBlock({ phase, eyebrow }: { phase: ReportPhase; eyebrow: string }) {
+  return React.createElement(
+    View,
+    { style: styles.phaseBlock },
+    React.createElement(
+      View,
+      { style: styles.phaseHeader },
+      React.createElement(Text, { style: styles.phaseEyebrow }, eyebrow),
+      React.createElement(Text, { style: styles.phaseTitle }, phase.title)
+    ),
+    ...phase.actions.map((a, i) =>
       React.createElement(
         View,
         { key: `a${i}`, style: [styles.action, i === 0 ? styles.actionFirst : {}] },
@@ -318,14 +370,13 @@ function RoadmapSection({
 
 export function ReportDocument({ report, lead }: { report: ReportData; lead: ReportLead }) {
   const date = formatDate();
-  const scoreCol = scoreColor(report.score);
 
   return React.createElement(
     Document,
     {
       title: `EMVY Mini AI Strategy Assessment — ${report.businessName}`,
       author: "EMVY AI",
-      subject: "30/60/90 AI Roadmap",
+      subject: "AI Strategy Report",
     },
     React.createElement(
       Page,
@@ -337,12 +388,12 @@ export function ReportDocument({ report, lead }: { report: ReportData; lead: Rep
         React.createElement(MVMark, { size: 16 }),
         React.createElement(Text, { style: styles.coverBrandText }, "EMVY · MINI AI STRATEGY ASSESSMENT")
       ),
-      React.createElement(Text, { style: styles.coverEyebrow }, "30/60/90 Roadmap"),
+      React.createElement(Text, { style: styles.coverEyebrow }, "AI Strategy Report"),
       React.createElement(
         Text,
         { style: styles.coverTitle },
         report.businessName,
-        React.createElement(Text, { style: styles.coverTitleAccent }, " — your AI roadmap")
+        React.createElement(Text, { style: styles.coverTitleAccent }, " — your AI strategy")
       ),
       React.createElement(Text, { style: styles.coverSub }, report.summary),
       React.createElement(
@@ -352,65 +403,38 @@ export function ReportDocument({ report, lead }: { report: ReportData; lead: Rep
       ),
       React.createElement(View, { style: styles.accentRule }),
 
-      // Score block
-      React.createElement(
-        View,
-        { style: styles.scoreBlock },
-        React.createElement(
-          View,
-          null,
-          React.createElement(Text, { style: [styles.scoreNum, { color: scoreCol }] }, String(report.score)),
-          React.createElement(Text, { style: styles.scoreSuffix }, "/100")
-        ),
-        React.createElement(
-          View,
-          { style: styles.scoreSide },
-          React.createElement(Text, { style: styles.scoreLabel }, report.scoreLabel),
-          React.createElement(Text, { style: styles.scoreBlurb }, report.scoreBlurb)
-        )
+      // 3 Opportunities
+      ...report.opportunities.map((o, i) =>
+        React.createElement(OpportunityCard, { key: `o${i}`, opportunity: o, index: i })
       ),
 
-      // Sections
-      report.week1.length > 0 &&
-        React.createElement(RoadmapSection, {
-          eyebrow: "Week 01",
-          title: "What to do this week",
-          actions: report.week1,
-        }),
-      report.weeks24.length > 0 &&
-        React.createElement(RoadmapSection, {
-          eyebrow: "Weeks 02–04",
-          title: "Your first 30 days",
-          actions: report.weeks24,
-        }),
-      report.months23.length > 0 &&
-        React.createElement(RoadmapSection, {
-          eyebrow: "Months 02–03",
-          title: "The compounding horizon",
-          actions: report.months23,
-        }),
+      // Quick Win
+      report.quickWin && React.createElement(QuickWinCallout, { quickWin: report.quickWin }),
 
-      // CTA
-      React.createElement(
-        View,
-        { style: styles.ctaBlock },
-        React.createElement(Text, { style: styles.ctaEyebrow }, "Next step"),
-        React.createElement(Text, { style: styles.ctaTitle }, report.nextStep),
-        React.createElement(
-          Text,
-          { style: styles.ctaBody },
-          "A free 15-min discovery call with EMVY. We map the exact automations to your business, sequence them by ROI, and ship the first one inside two weeks."
-        ),
-        React.createElement(Text, { style: styles.ctaBtn }, "Book a discovery call →"),
-        React.createElement(Text, { style: styles.ctaFine }, "emvyai.com  ·  hello@emvyai.com  ·  Sydney, AU")
+      // 3 Phases
+      ...report.first90Days.map((p, i) =>
+        React.createElement(PhaseBlock, {
+          key: `p${i}`,
+          phase: p,
+          eyebrow: i === 0 ? "FIRST 30 DAYS" : i === 1 ? "NEXT 30 DAYS" : "DAYS 60–90",
+        })
       ),
+
+      // Closer (LLM's nextStep)
+      report.nextStep &&
+        React.createElement(
+          View,
+          { style: styles.closerBlock },
+          React.createElement(Text, { style: styles.closerEyebrow }, "What to do next"),
+          React.createElement(Text, { style: styles.closerBody }, report.nextStep)
+        ),
 
       // Footer
       React.createElement(
         View,
         { style: styles.footer, fixed: true },
         React.createElement(Text, {}, `EMVY Mini AI Strategy Assessment  ·  ${lead.email}`),
-        React.createElement(Text, {}, `Page 1  ·  ${date}`)
+        React.createElement(Text, {}, `${date}`)
       )
     )
   );

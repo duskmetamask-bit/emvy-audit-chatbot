@@ -7,7 +7,7 @@ import { EmvyLogo, EmvyWordmark } from "@/components/EmvyLogo";
 import { BuildTheater, BuildStage } from "@/components/BuildTheater";
 import { RoadmapSection } from "@/components/RoadmapSection";
 import { callConvexMutation, callConvexQuery } from "@/lib/convex";
-import { TOTAL_QUESTIONS, CATEGORIES } from "@/lib/agent";
+import { TOTAL_QUESTIONS } from "@/lib/agent";
 import {
   useAuditStore,
   type Message,
@@ -18,42 +18,19 @@ import {
 
 const BOOKING_URL = "https://emvyai.com/services/discovery-call";
 
-const CATEGORY_LABELS: Record<string, string> = {
-  // Q1's "business basics" id isn't in the CATEGORIES spine — it only
-  // shows up as currentCategory on turn 1. The fallback `id` in
-  // categoryLabel() would otherwise print raw snake_case. We also map
-  // the bare "business" string the LLM sometimes sends in its place —
-  // easier to alias it here than to fight the model for an exact id.
-  business_basics: "Business basics",
-  business: "Business basics",
-  lead_capture: "Lead capture",
-  booking: "Booking & scheduling",
-  comms: "Customer communication",
-  ops: "Job tracking",
-  quoting: "Quotes & estimates",
-  invoicing: "Invoicing & payment",
-  followup: "Follow-up",
-  reviews: "Reviews & reputation",
-  team: "Team coordination",
-  reporting: "Reporting",
-  tools: "Tools & AI",
-  goal: "90-day goal",
-};
-
-function categoryLabel(id: string): string {
-  return CATEGORY_LABELS[id] ?? id;
-}
-
+// v2 build theater: matches STAGE_PLAN in @/lib/agent.ts. Keep these in
+// sync — keys are the SSE `stage` values the route emits, labels are the
+// user-visible build theater copy.
 const STAGE_PLAN: Array<{ key: string; label: string }> = [
-  { key: "mapping_week1", label: "Mapping your week 1 priorities" },
-  { key: "drafting_weeks24", label: "Drafting your 30-day plan" },
-  { key: "drafting_months23", label: "Mapping your 60–90 day horizon" },
-  { key: "writing_summary", label: "Writing your executive summary" },
+  { key: "reading_answers", label: "Reading your answers" },
+  { key: "spotting_opportunities", label: "Spotting the 3 opportunities" },
+  { key: "mapping_quickwin_90", label: "Mapping your quick win + first 90 days" },
+  { key: "writing_summary", label: "Writing your summary" },
 ];
 
 export default function AuditChatbot() {
   // Persistent state — survives page reloads. Backed by localStorage via
-  // useSyncExternalStore. The transient `isBotTyping` / `scoreDisplay` /
+  // useSyncExternalStore. The transient `isBotTyping` /
   // `buildStages` / `input` / `emailError` / `isGeneratingPdf` stay as
   // local useState because persisting them would write to localStorage on
   // every keystroke / RAF tick.
@@ -74,7 +51,6 @@ export default function AuditChatbot() {
   const [buildStages, setBuildStages] = useState<BuildStage[]>(() =>
     STAGE_PLAN.map((s) => ({ key: s.key, label: s.label, status: "pending" as const }))
   );
-  const [scoreDisplay, setScoreDisplay] = useState(0);
 
   const chatEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -175,15 +151,16 @@ export default function AuditChatbot() {
       });
       if (row && isReportReady(row)) {
         const r: ReportData = {
-          score: typeof row.score === "number" ? row.score : 0,
-          scoreLabel: typeof row.scoreLabel === "string" ? row.scoreLabel : "",
-          scoreBlurb: typeof row.scoreBlurb === "string" ? row.scoreBlurb : "",
           businessName: typeof row.businessName === "string" ? row.businessName : "",
           industry: typeof row.industry === "string" ? row.industry : "",
           summary: typeof row.summary === "string" ? row.summary : "",
-          week1: Array.isArray(row.week1) ? (row.week1 as string[]) : [],
-          weeks24: Array.isArray(row.weeks24) ? (row.weeks24 as string[]) : [],
-          months23: Array.isArray(row.months23) ? (row.months23 as string[]) : [],
+          opportunities: Array.isArray(row.opportunities)
+            ? (row.opportunities as ReportData["opportunities"])
+            : [],
+          quickWin: typeof row.quickWin === "string" ? row.quickWin : "",
+          first90Days: Array.isArray(row.first90Days)
+            ? (row.first90Days as ReportData["first90Days"])
+            : [],
           nextStep: typeof row.nextStep === "string" ? row.nextStep : "",
         };
         patch({ report: r, completedAt: new Date().toISOString() });
@@ -266,16 +243,12 @@ export default function AuditChatbot() {
     return new Date().toTimeString().slice(0, 8);
   }
 
-  // Signal-based progress, not question-count based. The audit-v4 LLM
-  // can fold several categories into a single answer ("we run
-  // everything through HubSpot" → lead_capture + booking + comms
-  // covered in one turn), so the bar should jump on a fold, not creep
-  // linearly. The denominator is the spine length (12) so we never
-  // hit 100% from the question counter alone — categoriesCovered is
-  // the only signal that should land us at 100.
+  // Question-counter progress. The LLM tracks `currentQuestion` (1-10);
+  // a follow-up turn keeps the same number, so the bar reflects the
+  // spine position, not message count.
   const estimatedProgress = Math.min(
     100,
-    (assessment.categoriesCovered.length / CATEGORIES.length) * 100
+    ((assessment.currentQuestion ?? 0) / TOTAL_QUESTIONS) * 100
   );
 
   async function callChatApi(
@@ -394,30 +367,6 @@ export default function AuditChatbot() {
     setBuildStages((prev) => prev.map((s) => ({ ...s, status: "done" as const })));
   }
 
-  const animateScore = useCallback((target: number) => {
-    const duration = 1200;
-    const start = performance.now();
-    const tick = (now: number) => {
-      const elapsed = now - start;
-      const t = Math.min(1, elapsed / duration);
-      // ease-out cubic
-      const eased = 1 - Math.pow(1 - t, 3);
-      setScoreDisplay(Math.round(target * eased));
-      if (t < 1) requestAnimationFrame(tick);
-    };
-    requestAnimationFrame(tick);
-  }, []);
-
-  // Re-run the score tween whenever a report becomes visible — both on
-  // first paint after a restore and after a fresh SSE arrival in the
-  // same session. The transient scoreDisplay is 0 on reload, so the
-  // restored reveal animates from 0 → score just like a fresh run.
-  useEffect(() => {
-    if (stage === "report" && report) {
-      animateScore(report.score);
-    }
-  }, [stage, report, animateScore]);
-
   async function handleEmailSubmit() {
     setEmailError("");
     if (!name.trim()) { setEmailError("Please enter your name"); return; }
@@ -425,7 +374,6 @@ export default function AuditChatbot() {
 
     setStage("building");
     setBuildStages(STAGE_PLAN.map((s) => ({ key: s.key, label: s.label, status: "pending" as const })));
-    setScoreDisplay(0);
 
     const finalAssessment: Assessment = {
       ...assessment,
@@ -456,17 +404,11 @@ export default function AuditChatbot() {
               businessName: finalAssessment.businessName || undefined,
               industry: finalAssessment.industry || undefined,
               teamSize: finalAssessment.teamSize || undefined,
-              score: 0,
-              scoreLabel: "Pending",
               findings: finalAssessment.findings,
-              categoriesCovered: finalAssessment.categoriesCovered,
               painPoints: finalAssessment.painPoints,
               manualTasks: finalAssessment.manualTasks,
-              scores: finalAssessment.scores,
               aiTools: finalAssessment.aiTools || undefined,
-              budget: finalAssessment.budget || undefined,
               goal: finalAssessment.goal || undefined,
-              obstacles: finalAssessment.obstacles || undefined,
             },
           })) as { chatbotLeadId?: string } | null;
           if (result?.chatbotLeadId) {
@@ -518,24 +460,21 @@ export default function AuditChatbot() {
       if (payload.report) {
         const r = payload.report as ReportData;
         setReport(r);
-        // The score-tween useEffect ([stage, report]) re-runs animateScore
+        // The report has landed.
         // automatically — the manual call here would double-fire.
         // Backfill the full report to Convex so the board pipeline shows the
-        // real score + summary + 30/60/90 instead of the "Pending / 0" stub
-        // that :create wrote at email-submit time. Fire-and-forget.
+        // real summary + 5-section report instead of the stub that :create
+        // wrote at email-submit time. Fire-and-forget.
         const chatbotLeadId = chatbotLeadIdRef.current ?? state.chatbotLeadId;
         if (chatbotLeadId) {
           void callConvexMutation({
             functionName: "audit_chatbot_leads:update",
             args: {
               id: chatbotLeadId,
-              score: r.score,
-              scoreLabel: r.scoreLabel,
-              scoreBlurb: r.scoreBlurb,
               summary: r.summary,
-              week1: r.week1,
-              weeks24: r.weeks24,
-              months23: r.months23,
+              opportunities: r.opportunities,
+              quickWin: r.quickWin,
+              first90Days: r.first90Days,
               nextStep: r.nextStep,
             },
           }).catch((err) => console.error("Convex report backfill failed:", err));
@@ -641,10 +580,9 @@ export default function AuditChatbot() {
               gap: 14,
               color: "inherit",
             }}
-            aria-label="EMVY AI Mini Strategy"
+            aria-label="EMVY"
           >
-            <EmvyWordmark height={64} />
-            <span style={{ color: "var(--text-muted)", fontSize: 20, fontWeight: 400, lineHeight: 1 }}>· Mini AI Strategy</span>
+            <EmvyWordmark height={112} />
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 18 }}>
             {stage !== "welcome" && state.messages.length > 0 && (
@@ -665,14 +603,6 @@ export default function AuditChatbot() {
               >
                 Start over
               </button>
-            )}
-            {stage === "chat" && (
-              <span className="label-meta" style={{ color: "var(--text-secondary)" }}>
-                <span style={{ color: "var(--accent)", fontWeight: 500 }}>
-                  Area {Math.min(CATEGORIES.length, assessment.categoriesCovered.length)} of {CATEGORIES.length} covered
-                </span>{" "}
-                · {assessment.currentCategory ? categoryLabel(assessment.currentCategory) : "starting"}
-              </span>
             )}
           </div>
         </div>
@@ -743,7 +673,6 @@ export default function AuditChatbot() {
             report={report}
             name={name}
             email={email}
-            scoreDisplay={scoreDisplay}
             isGeneratingPdf={isGeneratingPdf}
             onDownload={generatePdf}
           />
@@ -755,17 +684,9 @@ export default function AuditChatbot() {
 
 // Distinguishes a real report row (post-:update) from the stub
 // row that :create writes at email-submit time. The stub has
-// `scoreLabel: "Pending"` and `week1: []`; the real row has
-// either a non-Pending label OR a non-empty week1. The check is
-// belt-and-braces: if the SSE completed and :update ran, both
-// fields are in their ready form; if the SSE was killed mid-flight,
-// both are in their stub form.
+// `opportunities: []`; the real row has 3.
 function isReportReady(row: Record<string, unknown>): boolean {
-  return (
-    row.scoreLabel !== "Pending" &&
-    Array.isArray(row.week1) &&
-    row.week1.length > 0
-  );
+  return Array.isArray(row.opportunities) && row.opportunities.length > 0;
 }
 
 /* ─── Welcome / Hero ─────────────────────────────────────────────────────────── */
@@ -799,9 +720,9 @@ function WelcomeScreen({ onStart }: { onStart: () => void }) {
       <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
         <div
           className="label-eyebrow-accent animate-fade-down"
-          style={{ animationDelay: "60ms", opacity: 0, animationFillMode: "forwards" }}
+          style={{ animationDelay: "60ms", opacity: 0, animationFillMode: "forwards", fontSize: 13 }}
         >
-          Free · 5 minutes · No commitment
+          Mini AI Strategy
         </div>
 
         <h1
@@ -815,76 +736,90 @@ function WelcomeScreen({ onStart }: { onStart: () => void }) {
             animation: "fadeUp var(--motion-slow) var(--ease-out) 120ms forwards",
           }}
         >
-          A 30-day AI
-          <br />
-          roadmap for your
-          <br />
-          <span style={{ color: "var(--accent)" }}>business</span>
-          <span style={{ color: "var(--text-muted)" }}> — in 5 minutes.</span>
+          A Free <span style={{ color: "var(--accent)" }}>AI Strategy Assessment</span> for your business
         </h1>
 
-        <p
+        <ul
           style={{
-            fontSize: 17,
+            fontSize: 16,
             lineHeight: 1.55,
             color: "var(--text-secondary)",
             maxWidth: 480,
             margin: 0,
+            paddingLeft: 20,
+            listStyleType: "disc",
             opacity: 0,
             animation: "fadeUp var(--motion-slow) var(--ease-out) 220ms forwards",
           }}
         >
-          Answer a few short questions about how your business runs day to day — around 5 minutes, give or take.
-          Walk away with a personalised 30/60/90 day plan you can ship this week — built by EMVY, ready to action.
-        </p>
+          <li>Answer a few short questions about how your business runs day to day</li>
+          <li>Around 5 minutes, give or take</li>
+          <li>Walk away with a personalised 30/60/90 day plan you can ship this week</li>
+        </ul>
 
         <div
           style={{
             display: "flex",
-            alignItems: "center",
-            gap: 16,
+            flexDirection: "column",
+            alignItems: "flex-start",
+            gap: 48,
             marginTop: 8,
             opacity: 0,
             animation: "fadeUp var(--motion-slow) var(--ease-out) 320ms forwards",
           }}
         >
           <button onClick={onStart} className="btn-primary" style={{ padding: "14px 26px", fontSize: 15 }}>
-            Start my audit
+            Start my strategy
             <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
               <path d="M2 7H12M8 3L12 7L8 11" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
             </svg>
           </button>
-          <a
-            href="https://emvyai.com/services/ai-strategy-call"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="label-link"
-            style={{ fontSize: 13 }}
-          >
-            Want the full strategy? $500 AI Strategy →
-          </a>
+
+          <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-start", gap: 10 }}>
+            <span className="label-eyebrow" style={{ color: "var(--text-muted)" }}>
+              Want the Full Strategy?
+            </span>
+            <a
+              href="https://emvyai.com/services/ai-strategy-call"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="btn-outline"
+              style={{ textDecoration: "none", display: "inline-flex", alignItems: "center", gap: 8 }}
+            >
+              AI Strategy Call
+              <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
+                <path d="M2 7H12M8 3L12 7L8 11" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+            </a>
+          </div>
         </div>
       </div>
 
       <div className="hero-preview" style={{ display: "flex", flexDirection: "column", gap: 14 }}>
         <PreviewCard
-          eyebrow="Week 01"
-          title="Quick wins"
-          items={["Audit recurring copy-paste work", "Pick the 1 to automate first", "Set up a shared roadmap doc"]}
+          eyebrow="YOUR STRATEGY"
+          title="A 2-3 sentence read on your business"
+          items={["Direction, not diagnosis", "Names the highest-leverage move", "Specific to your answers"]}
           delayMs={420}
         />
         <PreviewCard
-          eyebrow="Weeks 02–04"
-          title="First automation"
-          items={["Ship the week 1 target end-to-end", "Automate invoice or follow-up", "Brief the team on AI policy"]}
+          eyebrow="WHERE AI HELPS"
+          title="3 opportunities, ranked by impact"
+          items={["Each with what it is and why it matters", "What changes when it works", "How fast you see a result"]}
           delayMs={540}
           offset
         />
         <PreviewCard
-          eyebrow="Months 02–03"
-          title="Compound the wins"
-          items={["Layer AI into lead pipeline", "Weekly AI review cadence", "Quarterly roadmap refresh"]}
+          eyebrow="QUICK WIN"
+          title="One thing to do this week"
+          items={["No tools, just one move", "Based on what you said is broken", "Ship it Monday"]}
           delayMs={660}
+        />
+        <PreviewCard
+          eyebrow="FIRST 90 DAYS"
+          title="A phased 30/60/90 plan"
+          items={["First 30: fix the biggest time drain", "Next 30: foundations for the top opportunity", "Days 60-90: ship your first real AI system"]}
+          delayMs={780}
         />
       </div>
     </div>
@@ -921,7 +856,7 @@ function PreviewCard({
           position: "absolute",
           inset: 0,
           background:
-            "linear-gradient(135deg, transparent 0%, rgba(86, 217, 255, 0.04) 100%)",
+            "linear-gradient(135deg, transparent 0%, rgba(0, 229, 255, 0.04) 100%)",
           pointerEvents: "none",
         }}
       />
@@ -1009,14 +944,6 @@ function ChatStage({
   onGoToEmail: () => void;
   chatEndRef: React.RefObject<HTMLDivElement | null>;
 }) {
-  // Header chip shows how many spine categories we've covered, not the
-  // raw currentQuestion. A follow-up turn can push currentQuestion to
-  // 14-20 (audit-v4: up to 7 follow-ups per category) but the display
-  // is signal-based — same semantic as the progress bar.
-  const areasCovered = Math.min(CATEGORIES.length, assessment.categoriesCovered.length);
-  const currentCategory = assessment.currentCategory
-    ? categoryLabel(assessment.currentCategory)
-    : "Getting started";
   return (
     <div
       className="mx-auto"
@@ -1116,15 +1043,12 @@ function ChatStage({
             className="label-meta"
             style={{
               display: "flex",
-              justifyContent: "space-between",
+              justifyContent: "center",
               padding: "0 4px",
               gap: 8,
             }}
           >
             <span>Your answers stay private</span>
-            <span style={{ color: "var(--accent)" }}>
-              Area {areasCovered} of {CATEGORIES.length} covered · {currentCategory}
-            </span>
           </div>
         </div>
       </div>
@@ -1144,18 +1068,6 @@ function ChatBubble({ msg, isBotTyping, isLast }: { msg: Message; isBotTyping: b
       }}
       className="animate-fade-up"
     >
-      {!isUser && (
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: 8,
-          }}
-        >
-          <EmvyLogo size={14} />
-          <span className="label-eyebrow-accent" style={{ fontSize: 10 }}>EMVY · Mini AI Strategy</span>
-        </div>
-      )}
       <div className={isUser ? "message-user" : "message-bot"}>
         {msg.content ? (
           isUser ? (
@@ -1316,18 +1228,15 @@ function ReportStage({
   report,
   name,
   email,
-  scoreDisplay,
   isGeneratingPdf,
   onDownload,
 }: {
   report: ReportData;
   name: string;
   email: string;
-  scoreDisplay: number;
   isGeneratingPdf: boolean;
   onDownload: () => void;
 }) {
-  const scoreColor = report.score >= 70 ? "var(--success)" : report.score >= 40 ? "var(--accent)" : "var(--error)";
   return (
     <div
       className="mx-auto"
@@ -1367,165 +1276,107 @@ function ReportStage({
         <div className="divider-accent" style={{ marginTop: 8 }} />
       </header>
 
-      {/* Score + summary card */}
+      {/* Summary card */}
       <section
-        className="card-elevated report-score-row"
+        className="card-elevated"
         style={{
-          display: "grid",
-          gridTemplateColumns: "auto 1fr",
-          gap: 32,
-          alignItems: "center",
-          marginBottom: 32,
+          padding: "clamp(20px, 3vw, 28px)",
+          marginBottom: 24,
           opacity: 0,
           animation: "fadeUp var(--motion-slow) var(--ease-out) 60ms forwards",
         }}
       >
         <div
+          className="label-eyebrow-accent"
+          style={{ marginBottom: 10 }}
+        >
+          Executive summary
+        </div>
+        <p
           style={{
-            display: "flex",
-            flexDirection: "column",
-            alignItems: "center",
-            minWidth: 140,
+            fontSize: 16,
+            lineHeight: 1.6,
+            color: "var(--foreground)",
+            margin: 0,
           }}
         >
-          <div
-            className="label-eyebrow-accent"
-            style={{ marginBottom: 6 }}
-          >
-            AI Readiness
+          {report.summary}
+        </p>
+      </section>
+
+      {/* 3 Opportunities — Where AI Can Help Your Business */}
+      <div style={{ display: "flex", flexDirection: "column", gap: 12, marginBottom: 32 }}>
+        <div className="label-eyebrow-accent" style={{ marginBottom: 4 }}>
+          Where AI can help your business
+        </div>
+        {report.opportunities.map((o, i) => (
+          <OpportunityCard key={`o${i}`} opportunity={o} index={i} />
+        ))}
+      </div>
+
+      {/* Quick Win */}
+      {report.quickWin && <QuickWinCallout quickWin={report.quickWin} />}
+
+      {/* First 90 Days — 3 phases */}
+      <div style={{ display: "flex", flexDirection: "column", gap: 16, marginBottom: 32 }}>
+        <div className="label-eyebrow-accent" style={{ marginBottom: 4 }}>
+          Your first 90 days
+        </div>
+        {report.first90Days.map((p, i) => (
+          <RoadmapSection
+            key={`p${i}`}
+            eyebrow={i === 0 ? "FIRST 30 DAYS" : i === 1 ? "NEXT 30 DAYS" : "DAYS 60–90"}
+            title={p.title}
+            actions={p.actions}
+            index={i + 1}
+          />
+        ))}
+      </div>
+
+      {/* Closer — What to do next (LLM's nextStep) */}
+      {report.nextStep && (
+        <section
+          className="card-accent"
+          style={{
+            padding: "clamp(24px, 4vw, 36px)",
+            textAlign: "center",
+            opacity: 0,
+            animation: "fadeUp var(--motion-slow) var(--ease-out) 500ms forwards",
+          }}
+        >
+          <div className="label-eyebrow-accent" style={{ marginBottom: 12 }}>
+            What to do next
           </div>
-          <div
+          <p
             style={{
-              fontFamily: "var(--font-display), 'Space Grotesk', system-ui, sans-serif",
-              fontSize: 64,
-              fontWeight: 700,
-              letterSpacing: "-0.04em",
-              lineHeight: 1,
-              color: scoreColor,
-              fontVariantNumeric: "tabular-nums",
-            }}
-          >
-            {scoreDisplay}
-            <span
-              style={{
-                fontSize: 22,
-                color: "var(--text-muted)",
-                fontWeight: 500,
-                marginLeft: 2,
-              }}
-            >
-              /100
-            </span>
-          </div>
-          <div
-            style={{
-              fontSize: 12,
-              color: "var(--text-secondary)",
-              marginTop: 6,
+              color: "var(--foreground)",
+              fontSize: 17,
+              lineHeight: 1.55,
+              margin: "0 auto 20px",
+              maxWidth: 540,
               fontWeight: 500,
             }}
           >
-            {report.scoreLabel}
-          </div>
-        </div>
-        <div>
-          <p
-            style={{
-              fontSize: 16,
-              lineHeight: 1.6,
-              color: "var(--foreground)",
-              margin: 0,
-              marginBottom: 12,
-            }}
-          >
-            {report.summary}
+            {report.nextStep}
           </p>
+          <a
+            href={BOOKING_URL}
+            className="btn-primary"
+            style={{ textDecoration: "none" }}
+          >
+            Book a free 15-min discovery call
+            <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
+              <path d="M2 7H12M8 3L12 7L8 11" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+          </a>
           <p
             className="label-meta"
-            style={{ color: "var(--text-muted)" }}
+            style={{ marginTop: 16, color: "var(--text-muted)" }}
           >
-            {report.scoreBlurb}
+            No pitch deck. No pressure. Just a focused 15 minutes.
           </p>
-        </div>
-      </section>
-
-      {/* Roadmap sections */}
-      <div style={{ display: "flex", flexDirection: "column", gap: 16, marginBottom: 32 }}>
-        {report.week1.length > 0 && (
-          <RoadmapSection
-            eyebrow="Week 01"
-            title="What to do this week"
-            actions={report.week1}
-            index={1}
-          />
-        )}
-        {report.weeks24.length > 0 && (
-          <RoadmapSection
-            eyebrow="Weeks 02–04"
-            title="Your first 30 days"
-            actions={report.weeks24}
-            index={2}
-          />
-        )}
-        {report.months23.length > 0 && (
-          <RoadmapSection
-            eyebrow="Months 02–03"
-            title="The compounding horizon"
-            actions={report.months23}
-            index={3}
-          />
-        )}
-      </div>
-
-      {/* CTA block */}
-      <section
-        className="card-accent"
-        style={{
-          padding: "clamp(24px, 4vw, 36px)",
-          textAlign: "center",
-          opacity: 0,
-          animation: "fadeUp var(--motion-slow) var(--ease-out) 500ms forwards",
-        }}
-      >
-        <h2
-          style={{
-            fontSize: "clamp(22px, 3vw, 30px)",
-            fontWeight: 600,
-            letterSpacing: "-0.025em",
-            margin: 0,
-            marginBottom: 10,
-          }}
-        >
-          Ready for the full picture?
-        </h2>
-        <p
-          style={{
-            color: "var(--text-secondary)",
-            fontSize: 15,
-            lineHeight: 1.55,
-            margin: "0 auto 20px",
-            maxWidth: 480,
-          }}
-        >
-          {report.nextStep}
-        </p>
-        <a
-          href={BOOKING_URL}
-          className="btn-primary"
-          style={{ textDecoration: "none" }}
-        >
-          Book a free 15-min discovery call
-          <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
-            <path d="M2 7H12M8 3L12 7L8 11" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
-          </svg>
-        </a>
-        <p
-          className="label-meta"
-          style={{ marginTop: 16, color: "var(--text-muted)" }}
-        >
-          No pitch deck. No pressure. Just a focused 15 minutes.
-        </p>
-      </section>
+        </section>
+      )}
 
       {/* PDF download */}
       <div
@@ -1546,5 +1397,118 @@ function ReportStage({
         </button>
       </div>
     </div>
+  );
+}
+
+/* ─── Report sub-components ────────────────────────────────────────────────── */
+
+// One card per opportunity. Title + 4 labeled rows (What it is / Why it
+// matters / What changes / How fast). Stacked full-width on screen.
+function OpportunityCard({
+  opportunity,
+  index,
+}: {
+  opportunity: ReportData["opportunities"][number];
+  index: number;
+}) {
+  const rows: Array<{ label: string; value: string }> = [
+    { label: "What it is", value: opportunity.whatItIs },
+    { label: "Why it matters", value: opportunity.whyMatters },
+    { label: "What changes", value: opportunity.whatChanges },
+    { label: "How fast", value: opportunity.howFast },
+  ];
+  return (
+    <section
+      className="card"
+      style={{
+        padding: "clamp(20px, 3vw, 28px)",
+        opacity: 0,
+        animation: `fadeUp var(--motion-slow) var(--ease-out) ${120 + index * 80}ms forwards`,
+      }}
+    >
+      <div
+        className="label-eyebrow-accent"
+        style={{ marginBottom: 6 }}
+      >
+        Opportunity 0{index + 1}
+      </div>
+      <h3
+        style={{
+          fontSize: "clamp(20px, 2.5vw, 24px)",
+          fontWeight: 600,
+          letterSpacing: "-0.02em",
+          margin: 0,
+          marginBottom: 14,
+          lineHeight: 1.2,
+        }}
+      >
+        {opportunity.title}
+      </h3>
+      <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+        {rows.map((r) => (
+          <div
+            key={r.label}
+            style={{
+              display: "grid",
+              gridTemplateColumns: "120px 1fr",
+              gap: 14,
+              alignItems: "baseline",
+              paddingTop: 10,
+              borderTop: "1px solid var(--border)",
+            }}
+          >
+            <div
+              className="label-eyebrow"
+              style={{ color: "var(--text-muted)" }}
+            >
+              {r.label}
+            </div>
+            <div
+              style={{
+                fontSize: 14.5,
+                lineHeight: 1.55,
+                color: "var(--foreground)",
+              }}
+            >
+              {r.value}
+            </div>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+// Highlighted callout for the one thing to ship this week. Sits between
+// the opportunities and the 90-day plan.
+function QuickWinCallout({ quickWin }: { quickWin: string }) {
+  return (
+    <section
+      style={{
+        position: "relative",
+        padding: "clamp(20px, 3vw, 28px)",
+        background: "var(--accent-dim)",
+        borderLeft: "3px solid var(--accent)",
+        borderRadius: 8,
+        marginBottom: 32,
+        opacity: 0,
+        animation: "fadeUp var(--motion-slow) var(--ease-out) 360ms forwards",
+      }}
+    >
+      <div className="label-eyebrow-accent" style={{ marginBottom: 10 }}>
+        Your quick win — this week
+      </div>
+      <p
+        style={{
+          fontSize: 17,
+          lineHeight: 1.55,
+          color: "var(--foreground)",
+          margin: 0,
+          fontWeight: 500,
+        }}
+      >
+        {quickWin}
+      </p>
+    </section>
   );
 }

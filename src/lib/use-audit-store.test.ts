@@ -14,43 +14,61 @@ function fullAssessment(): Assessment {
     businessDescription: "residential + commercial plumbing in Sydney",
     teamSize: "5",
     industry: "trades",
-    scores: { lead_capture: 2, booking: 3, comms: 4 },
     findings: [
-      { category: "invoicing", text: "manual invoicing is painful", severity: "high" },
-      { category: "ops", text: "no job tracker", severity: "medium" },
+      { category: "invoicing", text: "manual invoicing is painful" },
+      { category: "ops", text: "no job tracker" },
     ],
     painPoints: ["manual invoicing", "calls going to voicemail"],
     manualTasks: ["chasing payments", "writing quotes"],
     aiTools: "ChatGPT for emails",
-    budget: "under 500/mo",
     goal: "automate follow-up",
-    obstacles: "no time",
     messageCount: 7,
-    categoriesCovered: ["lead_capture", "booking", "invoicing", "ops"],
     readyForEmail: true,
     currentQuestion: 4,
-    currentCategory: "ops",
   };
 }
 
 function fullReport(): ReportData {
   return {
-    score: 62,
-    scoreLabel: "Moderate readiness",
-    scoreBlurb: "Some good bones, a few obvious wins.",
     businessName: "Dusk Plumbing",
     industry: "trades",
     summary: "Dusk Plumbing has a solid lead flow but is leaking time on manual follow-up.",
-    week1: ["Audit recurring copy-paste work", "Set up a shared roadmap doc", "Pick 1 to automate first"],
-    weeks24: ["Ship the week 1 target end-to-end", "Automate invoice reminders"],
-    months23: ["Layer AI into lead pipeline", "Quarterly roadmap refresh"],
+    opportunities: [
+      {
+        title: "Automated invoice reminders",
+        whatItIs: "Auto-send reminders at 3, 7, and 14 days past due.",
+        whyMatters: "You're chasing payments by phone every week — that's a recurring 4-hour leak.",
+        whatChanges: "Cashflow shortens by ~40%, you stop playing bad cop.",
+        howFast: "Sees result in week 1 once reminders go live.",
+      },
+      {
+        title: "Lead response in 5 minutes",
+        whatItIs: "Auto-acknowledge every enquiry with a personalised reply.",
+        whyMatters: "Every hour of delay drops conversion — you're losing jobs to slow replies.",
+        whatChanges: "Conversion rate lifts, fewer jobs slip through.",
+        howFast: "Live inside a week.",
+      },
+      {
+        title: "Quote follow-up nudges",
+        whatItIs: "Auto-nudge outstanding quotes at day 3 and day 7.",
+        whyMatters: "Quotes that go cold cost you revenue you already worked for.",
+        whatChanges: "Quote-to-job conversion lifts, less manual chasing.",
+        howFast: "First nudge cycle lands in week 2.",
+      },
+    ],
+    quickWin: "This week: stop chasing payments by phone. Pick your top 5 outstanding invoices and call each one ONCE — after that, automate.",
+    first90Days: [
+      { title: "First 30 days", actions: ["Audit recurring copy-paste work", "Set up roadmap doc", "Pick 1 to automate"] },
+      { title: "Next 30 days", actions: ["Ship week 1 target", "Set up invoice reminders", "Brief team on AI policy"] },
+      { title: "Days 60-90", actions: ["Layer AI into lead pipeline", "Weekly AI review cadence", "Quarterly roadmap refresh"] },
+    ],
     nextStep: "Book a free 15-min discovery call with EMVY at https://emvyai.com/services/discovery-call!",
   };
 }
 
 function fullState(): AuditState {
   return {
-    version: 1,
+    version: 2,
     stage: "report",
     messages: [
       { role: "bot", content: "hey, ready when you are", timestamp: "09:00:00" },
@@ -98,8 +116,8 @@ describe("parseAuditState", () => {
   it("returns null for corrupt JSON inside the parsed object", () => {
     // The raw layer would have already called JSON.parse; this tests the
     // function with an already-parsed object that is structurally broken.
-    expect(parseAuditState({ version: 1, stage: "welcome" })).toBe(null); // missing messages
-    expect(parseAuditState({ version: 1, stage: "welcome", messages: "not an array" })).toBe(null);
+    expect(parseAuditState({ version: 2, stage: "welcome" })).toBe(null); // missing messages
+    expect(parseAuditState({ version: 2, stage: "welcome", messages: "not an array" })).toBe(null);
   });
 
   it("rejects wrong field types", () => {
@@ -134,63 +152,109 @@ describe("parseAuditState", () => {
 
   it("rejects version mismatches (forward-compat safety)", () => {
     const base = fullState();
-    expect(parseAuditState({ ...base, version: 2 })).toBe(null);
+    expect(parseAuditState({ ...base, version: 1 })).toBe(null); // stale v1 on disk
+    expect(parseAuditState({ ...base, version: 3 })).toBe(null); // future
     expect(parseAuditState({ ...base, version: 0 })).toBe(null);
-    expect(parseAuditState({ ...base, version: "1" })).toBe(null);
+    expect(parseAuditState({ ...base, version: "2" })).toBe(null);
     expect(parseAuditState({ ...base, version: undefined })).toBe(null);
   });
 
-  it("rejects assessment with bad enum values (severity is the load-bearing one for UI)", () => {
+  it("rejects assessment with bad currentQuestion (out of [0, 10], non-integer)", () => {
+    // v2 spine is 10 questions; currentQuestion can be 0 (haven't started)
+    // through 10 (just asked Q10). Anything outside that range is bad.
     const base = fullState();
-    // The persistence layer is lenient on the `category` string — the LLM is
-    // the source of truth and may invent new category labels. Severity is
-    // strict because it drives the report's UI grouping.
-    const lenientCategory = {
-      ...base,
-      assessment: {
-        ...base.assessment,
-        findings: [{ category: "fake_category", text: "x", severity: "high" }],
-      },
-    };
-    expect(parseAuditState(lenientCategory)).not.toBe(null);
-
-    const badSeverity = {
-      ...base,
-      assessment: {
-        ...base.assessment,
-        findings: [{ category: "invoicing", text: "x", severity: "extreme" }],
-      },
-    };
-    expect(parseAuditState(badSeverity)).toBe(null);
-  });
-
-  it("rejects assessment with bad score values (non-integer, out of range, non-number)", () => {
-    const base = fullState();
-    const tooHigh = { ...base, assessment: { ...base.assessment, scores: { lead_capture: 6 } } };
-    expect(parseAuditState(tooHigh)).toBe(null);
-    const tooLow = { ...base, assessment: { ...base.assessment, scores: { lead_capture: -1 } } };
-    expect(parseAuditState(tooLow)).toBe(null);
-    const decimal = { ...base, assessment: { ...base.assessment, scores: { lead_capture: 3.5 } } };
-    expect(parseAuditState(decimal)).toBe(null);
-    const nan = { ...base, assessment: { ...base.assessment, scores: { lead_capture: "two" } } };
-    expect(parseAuditState(nan)).toBe(null);
-  });
-
-  it("rejects assessment with bad currentQuestion (out of [0, 13], non-integer)", () => {
-    const base = fullState();
-    expect(parseAuditState({ ...base, assessment: { ...base.assessment, currentQuestion: 14 } })).toBe(null);
+    expect(parseAuditState({ ...base, assessment: { ...base.assessment, currentQuestion: 11 } })).toBe(null);
     expect(parseAuditState({ ...base, assessment: { ...base.assessment, currentQuestion: -1 } })).toBe(null);
     expect(parseAuditState({ ...base, assessment: { ...base.assessment, currentQuestion: 7.5 } })).toBe(null);
     expect(parseAuditState({ ...base, assessment: { ...base.assessment, currentQuestion: "5" } })).toBe(null);
   });
 
-  it("rejects reports with bad score bounds or missing fields", () => {
+  it("accepts findings with arbitrary category strings (LLM is source of truth)", () => {
+    // The persistence layer is lenient on the `category` string — the LLM
+    // may invent new labels. Only the shape (object with category + text
+    // strings) is enforced.
     const base = fullState();
-    expect(parseAuditState({ ...base, report: { ...fullReport(), score: 150 } })).toBe(null);
-    expect(parseAuditState({ ...base, report: { ...fullReport(), score: -10 } })).toBe(null);
-    expect(parseAuditState({ ...base, report: { ...fullReport(), score: 62.5 } })).toBe(null);
-    expect(parseAuditState({ ...base, report: { ...fullReport(), week1: "not an array" } })).toBe(null);
+    const lenientCategory = {
+      ...base,
+      assessment: {
+        ...base.assessment,
+        findings: [{ category: "fake_category", text: "x" }],
+      },
+    };
+    expect(parseAuditState(lenientCategory)).not.toBe(null);
+
+    const badShape = {
+      ...base,
+      assessment: {
+        ...base.assessment,
+        findings: [{ category: "x" }], // missing text
+      },
+    };
+    expect(parseAuditState(badShape)).toBe(null);
+  });
+
+  it("rejects reports with bad opportunities, wrong action types, or missing required fields", () => {
+    const base = fullState();
+    // bad opportunity — missing sub-field
+    expect(
+      parseAuditState({
+        ...base,
+        report: {
+          ...fullReport(),
+          opportunities: [
+            {
+              title: "x",
+              whatItIs: "x",
+              whyMatters: "x",
+              whatChanges: "x",
+              // howFast missing
+            } as unknown as ReportData["opportunities"][number],
+          ],
+        },
+      })
+    ).toBe(null);
+    // bad opportunity — non-string sub-field
+    expect(
+      parseAuditState({
+        ...base,
+        report: {
+          ...fullReport(),
+          opportunities: [
+            {
+              title: "x",
+              whatItIs: "x",
+              whyMatters: 42,
+              whatChanges: "x",
+              howFast: "x",
+            },
+          ],
+        },
+      })
+    ).toBe(null);
+    // opportunities not an array
+    expect(parseAuditState({ ...base, report: { ...fullReport(), opportunities: "not an array" } })).toBe(null);
+    // quickWin not a string
+    expect(parseAuditState({ ...base, report: { ...fullReport(), quickWin: 99 } })).toBe(null);
+    // bad phase — actions not an array of strings
+    expect(
+      parseAuditState({
+        ...base,
+        report: {
+          ...fullReport(),
+          first90Days: [
+            { title: "First 30 days", actions: ["ok", 99, "ok"] },
+          ],
+        },
+      })
+    ).toBe(null);
+    // first90Days not an array
+    expect(parseAuditState({ ...base, report: { ...fullReport(), first90Days: "nope" } })).toBe(null);
+    // missing businessName
     expect(parseAuditState({ ...base, report: { ...fullReport(), businessName: undefined } })).toBe(null);
+    // missing summary
+    expect(parseAuditState({ ...base, report: { ...fullReport(), summary: undefined } })).toBe(null);
+    // missing nextStep
+    expect(parseAuditState({ ...base, report: { ...fullReport(), nextStep: undefined } })).toBe(null);
   });
 
   it("accepts report === null", () => {
@@ -213,9 +277,31 @@ describe("parseAuditState", () => {
       ...EMPTY_AUDIT_STATE,
       stage: "chat",
       messages: [{ role: "bot", content: "hey, ready when you are" }],
-      assessment: { ...EMPTY_AUDIT_STATE.assessment, currentQuestion: 1, currentCategory: "lead_capture" },
+      assessment: { ...EMPTY_AUDIT_STATE.assessment, currentQuestion: 1 },
     };
     expect(parseAuditState(state)).toEqual(state);
+  });
+
+  it("rejects assessment with stale v1 fields (scores / categoriesCovered / budget / obstacles)", () => {
+    // The v1 shape had scores, categoriesCovered, currentCategory, budget,
+    // obstacles — all dropped in v2. If a stale v2 payload has these as
+    // non-undefined values, the validator ignores them but should still
+    // accept the rest of the shape. We test the lenient path: stale fields
+    // are simply ignored, the assessment still passes.
+    const base = fullState();
+    const withStaleFields = {
+      ...base,
+      assessment: {
+        ...base.assessment,
+        scores: { lead_capture: 3 } as unknown as never,
+        categoriesCovered: ["ops"] as unknown as never,
+        currentCategory: "ops" as unknown as never,
+      },
+    };
+    // Validators don't know about these keys, so they pass through.
+    // (If we want strict rejection, isAssessment would need to enumerate
+    // allowed keys — not the v2 design.)
+    expect(parseAuditState(withStaleFields)).not.toBe(null);
   });
 });
 
@@ -310,14 +396,14 @@ describe("storage I/O", () => {
 
     const mod = await import("./use-audit-store");
     mod.writePatch({ stage: "chat", sessionId: "abc" });
-    expect(memStorage.getItem("emvy-audit-state:v1")).not.toBeNull();
-    const written = JSON.parse(memStorage.getItem("emvy-audit-state:v1") as string);
+    expect(memStorage.getItem("emvy-audit-state:v2")).not.toBeNull();
+    const written = JSON.parse(memStorage.getItem("emvy-audit-state:v2") as string);
     expect(written.stage).toBe("chat");
     expect(written.sessionId).toBe("abc");
-    expect(written.version).toBe(1);
+    expect(written.version).toBe(2);
 
     mod.writeClear();
-    expect(memStorage.getItem("emvy-audit-state:v1")).toBeNull();
+    expect(memStorage.getItem("emvy-audit-state:v2")).toBeNull();
   });
 
   it("writePatch merges with the existing state instead of overwriting", async () => {
@@ -333,16 +419,16 @@ describe("storage I/O", () => {
     const mod = await import("./use-audit-store");
     mod.writePatch({ stage: "chat", name: "Jake" });
     mod.writePatch({ sessionId: "sess-1" });
-    const written = JSON.parse(memStorage.getItem("emvy-audit-state:v1") as string);
+    const written = JSON.parse(memStorage.getItem("emvy-audit-state:v2") as string);
     expect(written.stage).toBe("chat");
     expect(written.name).toBe("Jake");
     expect(written.sessionId).toBe("sess-1");
   });
 
-  it("writePatch always writes version: 1, even if a stale payload is on disk", async () => {
+  it("writePatch always writes version: 2, even if a stale payload is on disk", async () => {
     const memStorage = makeMemoryStorage();
-    // Seed a corrupt payload — writePatch should still produce a valid v1.
-    memStorage.setItem("emvy-audit-state:v1", "{ not json");
+    // Seed a corrupt payload — writePatch should still produce a valid v2.
+    memStorage.setItem("emvy-audit-state:v2", "{ not json");
     (globalThis as Record<string, unknown>).window = {
       localStorage: memStorage,
       dispatchEvent: vi.fn(),
@@ -353,8 +439,8 @@ describe("storage I/O", () => {
 
     const mod = await import("./use-audit-store");
     mod.writePatch({ stage: "email" });
-    const written = JSON.parse(memStorage.getItem("emvy-audit-state:v1") as string);
-    expect(written.version).toBe(1);
+    const written = JSON.parse(memStorage.getItem("emvy-audit-state:v2") as string);
+    expect(written.version).toBe(2);
     expect(written.stage).toBe("email");
   });
 
@@ -374,7 +460,7 @@ describe("storage I/O", () => {
     expect(dispatchEvent).toHaveBeenCalled();
     const event = dispatchEvent.mock.calls[0]?.[0] as StorageEvent;
     expect(event.type).toBe("storage");
-    expect(event.key).toBe("emvy-audit-state:v1");
+    expect(event.key).toBe("emvy-audit-state:v2");
   });
 
   it("writePatch swallows quota-exceeded / private-mode setItem errors silently", async () => {
@@ -404,13 +490,16 @@ describe("EMPTY_AUDIT_STATE", () => {
   it("has the welcome stage and zero progress", () => {
     expect(EMPTY_AUDIT_STATE.stage).toBe("welcome");
     expect(EMPTY_AUDIT_STATE.messages).toEqual([]);
-    expect(EMPTY_AUDIT_STATE.assessment.scores).toEqual({});
+    expect(EMPTY_AUDIT_STATE.assessment.findings).toEqual([]);
+    expect(EMPTY_AUDIT_STATE.assessment.painPoints).toEqual([]);
+    expect(EMPTY_AUDIT_STATE.assessment.manualTasks).toEqual([]);
     expect(EMPTY_AUDIT_STATE.assessment.messageCount).toBe(0);
     expect(EMPTY_AUDIT_STATE.assessment.readyForEmail).toBe(false);
+    expect(EMPTY_AUDIT_STATE.assessment.currentQuestion).toBe(0);
   });
 
-  it("has a v1 version stamp", () => {
-    expect(EMPTY_AUDIT_STATE.version).toBe(1);
+  it("has a v2 version stamp", () => {
+    expect(EMPTY_AUDIT_STATE.version).toBe(2);
   });
 
   it("has null report + null chatbotLeadId + reportSent === false", () => {

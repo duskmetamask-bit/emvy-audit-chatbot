@@ -9,11 +9,12 @@ import { AuditAgent } from "./agent";
 export { AuditAgent };
 
 interface Env {
-  AUDIT_AGENT: DurableObjectNamespace;
+  AUDIT_AGENT: DurableObjectNamespace<AuditAgent>;
+  CONVEX_URL: "https://glad-camel-940.convex.cloud";
+  SUPABASE_URL: "https://rrjktvvnzjzlfquaghut.supabase.co";
+  VERCEL_REPORT_URL?: string;
   MINIMAX_API_KEY?: string;
   SUPABASE_ANON_KEY?: string;
-  SUPABASE_URL?: string;
-  VERCEL_REPORT_URL?: string;
 }
 
 function json(body: unknown, status = 200): Response {

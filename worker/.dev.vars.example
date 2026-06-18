@@ -1,0 +1,4 @@
+# Local dev secrets for the worker. Copy to `.dev.vars` (gitignored)
+# and fill in real values. Used by `wrangler dev`.
+
+MINIMAX_API_KEY=

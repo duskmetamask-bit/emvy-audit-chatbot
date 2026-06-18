@@ -22,14 +22,14 @@
   /* Borders */
   --border: rgba(255, 255, 255, 0.07);
   --border-subtle: rgba(255, 255, 255, 0.04);
-  --border-accent: rgba(86, 217, 255, 0.18);
+  --border-accent: rgba(0, 229, 255, 0.18);
 
-  /* Accent — sky cyan. The only colour that gets to be loud. */
-  --accent: #56d9ff;
-  --accent-hover: #7ee2ff;
-  --accent-press: #3fc6ef;
-  --accent-dim: rgba(86, 217, 255, 0.10);
-  --accent-glow: rgba(86, 217, 255, 0.32);
+  /* Accent — pure cyan. The only colour that gets to be loud. */
+  --accent: #00e5ff;
+  --accent-hover: #4debff;
+  --accent-press: #00c8e0;
+  --accent-dim: rgba(0, 229, 255, 0.10);
+  --accent-glow: rgba(0, 229, 255, 0.32);
   --accent-ink: #06121a; /* dark text on accent surfaces */
 
   /* Feedback — reserved for status, never primary */
@@ -100,8 +100,8 @@
   --color-accent-dim: var(--accent-dim);
   --color-success: var(--success);
   --color-error: var(--error);
-  --font-display: var(--font-space-grotesk);
-  --font-body: var(--font-manrope);
+  --font-display: "Century Gothic", "URW Gothic", "AppleGothic", system-ui, sans-serif;
+  --font-body: "Century Gothic", "URW Gothic", "AppleGothic", system-ui, sans-serif;
   --font-mono: var(--font-jetbrains-mono);
 }
 
@@ -120,7 +120,7 @@ html {
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: var(--font-body), 'Manrope', system-ui, sans-serif;
+  font-family: var(--font-body);
   font-feature-settings: "ss01" 1, "cv11" 1;
   min-height: 100vh;
   font-size: var(--text-base);
@@ -128,7 +128,7 @@ body {
 }
 
 h1, h2, h3, h4, h5, h6 {
-  font-family: var(--font-display), 'Space Grotesk', system-ui, sans-serif;
+  font-family: var(--font-display);
   font-weight: 600;
   letter-spacing: -0.025em;
   line-height: 1.1;
@@ -244,7 +244,7 @@ input, button, textarea {
 .btn-primary {
   background: var(--accent);
   color: var(--accent-ink);
-  font-family: var(--font-display), 'Space Grotesk', system-ui, sans-serif;
+  font-family: var(--font-display);
   font-weight: 600;
   font-size: var(--text-sm);
   letter-spacing: -0.005em;
@@ -275,7 +275,7 @@ input, button, textarea {
 .btn-ghost {
   background: transparent;
   color: var(--text-secondary);
-  font-family: var(--font-body), 'Manrope', sans-serif;
+  font-family: var(--font-body);
   font-weight: 500;
   font-size: var(--text-sm);
   padding: var(--space-2) var(--space-3);
@@ -291,7 +291,7 @@ input, button, textarea {
   background: transparent;
   color: var(--text-primary);
   border: 1px solid var(--border);
-  font-family: var(--font-body), 'Manrope', sans-serif;
+  font-family: var(--font-body);
   font-weight: 500;
   font-size: var(--text-sm);
   padding: 11px 22px;
@@ -311,7 +311,7 @@ input, button, textarea {
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
   color: var(--foreground);
-  font-family: var(--font-body), 'Manrope', sans-serif;
+  font-family: var(--font-body);
   font-size: var(--text-base);
   padding: 13px 16px;
   width: 100%;

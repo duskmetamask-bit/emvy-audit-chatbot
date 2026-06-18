@@ -102,9 +102,8 @@ export async function POST(req: NextRequest) {
       currentQuestion:
         parsed.currentQuestion ??
         (parsed.message.trim().endsWith("?")
-          ? Math.min(13, (assessment.currentQuestion ?? 0) + 1)
+          ? Math.min(10, (assessment.currentQuestion ?? 0) + 1)
           : assessment.currentQuestion),
-      currentCategory: parsed.currentCategory ?? assessment.currentCategory,
       messageCount: userTurns,
     };
 

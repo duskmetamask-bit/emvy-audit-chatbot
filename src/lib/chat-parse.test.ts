@@ -3,18 +3,15 @@ import {
   stripThinkBlocks,
   extractJsonObject,
   parseChatResponse,
-  type ParsedChatResponse,
 } from "./chat-parse";
 import { emptyAssessment, Assessment } from "./agent";
 
 function current(): Assessment {
   return {
     ...emptyAssessment(),
-    scores: { lead_capture: 2 },
     findings: [],
     painPoints: ["existing pain"],
     manualTasks: [],
-    categoriesCovered: ["lead_capture"],
     messageCount: 1,
     readyForEmail: false,
   };
@@ -37,6 +34,13 @@ describe("stripThinkBlocks", () => {
   it("removes multiple think blocks", () => {
     const raw = "<think>first thought</think>hello<think>second thought</think>there";
     expect(stripThinkBlocks(raw)).toBe("hellothere");
+  });
+
+  it("removes <think?> tag variant (M2.7 emits with literal `?` in opening tag)", () => {
+    expect(stripThinkBlocks("<think>reasoning here</think>ok cool")).toBe("ok cool");
+    expect(
+      stripThinkBlocks("<think>\nThe user greeted me. I should greet back and ask Q1.\nLet me draft the response.\n</think>hey there")
+    ).toBe("hey there");
   });
 
   it("removes reasoning and thinking tags too", () => {
@@ -89,11 +93,8 @@ describe("parseChatResponse", () => {
     const raw = JSON.stringify({
       message: "hey, what's the business called?",
       currentQuestion: 1,
-      currentCategory: "lead_capture",
       assessment: {
-        scores: { lead_capture: 2 },
         painPoints: ["manual invoicing"],
-        categoriesCovered: ["lead_capture"],
         readyForEmail: false,
       },
     });
@@ -101,8 +102,7 @@ describe("parseChatResponse", () => {
     expect(out).not.toBe(null);
     expect(out!.message).toBe("hey, what's the business called?");
     expect(out!.currentQuestion).toBe(1);
-    expect(out!.currentCategory).toBe("lead_capture");
-    expect(out!.assessmentUpdate.scores).toEqual({ lead_capture: 2, invoicing: undefined });
+    expect(out!.assessmentUpdate.painPoints).toEqual(["manual invoicing"]);
   });
 
   it("strips a think block before parsing", () => {
@@ -111,8 +111,7 @@ describe("parseChatResponse", () => {
       JSON.stringify({
         message: "hey, ready when you are",
         currentQuestion: 1,
-        currentCategory: "lead_capture",
-        assessment: { categoriesCovered: ["lead_capture"] },
+        assessment: {},
       });
     const out = parseChatResponse(raw, current());
     expect(out).not.toBe(null);
@@ -133,23 +132,19 @@ describe("parseChatResponse", () => {
     expect(out!.message).toBe("hi");
   });
 
-  it("clamps currentQuestion to 1-20 (13 spine + 7 follow-ups)", () => {
-    // audit-v4 widened the cap from 13 → 20 so follow-up turns (where
-    // the LLM digs deeper on a rich answer) don't get clamped back
-    // to the spine. The UI clamps the displayed number down for the
-    // header chip.
+  it("clamps currentQuestion to 1-10 (the v2 spine)", () => {
+    // v2 spine is 10 questions; follow-up turns stay on the same number.
+    // Anything outside 1-10 is clamped.
     const raw = JSON.stringify({ message: "q", currentQuestion: 99 });
-    expect(parseChatResponse(raw, current())!.currentQuestion).toBe(20);
+    expect(parseChatResponse(raw, current())!.currentQuestion).toBe(10);
     const raw2 = JSON.stringify({ message: "q", currentQuestion: -2 });
     expect(parseChatResponse(raw2, current())!.currentQuestion).toBe(1);
     const raw3 = JSON.stringify({ message: "q", currentQuestion: 7 });
     expect(parseChatResponse(raw3, current())!.currentQuestion).toBe(7);
-    // A follow-up turn (e.g. a second pass on the same category) lands
-    // in the 14-20 range and is preserved.
-    const raw4 = JSON.stringify({ message: "q", currentQuestion: 15 });
-    expect(parseChatResponse(raw4, current())!.currentQuestion).toBe(15);
-    const raw5 = JSON.stringify({ message: "q", currentQuestion: 20 });
-    expect(parseChatResponse(raw5, current())!.currentQuestion).toBe(20);
+    const raw4 = JSON.stringify({ message: "q", currentQuestion: 1 });
+    expect(parseChatResponse(raw4, current())!.currentQuestion).toBe(1);
+    const raw5 = JSON.stringify({ message: "q", currentQuestion: 10 });
+    expect(parseChatResponse(raw5, current())!.currentQuestion).toBe(10);
   });
 
   it("falls back to prose when no JSON is present", () => {
@@ -168,54 +163,27 @@ describe("parseChatResponse", () => {
     expect(out!.assessmentUpdate).toEqual({});
   });
 
-  it("merges scores into the current assessment", () => {
-    const raw = JSON.stringify({
-      message: "ok",
-      assessment: { scores: { invoicing: 1, lead_capture: 4 } },
-    });
-    const c = current(); // lead_capture is 2
-    const out = parseChatResponse(raw, c);
-    expect(out).not.toBe(null);
-    // existing lead_capture is overwritten by the new value
-    expect(out!.assessmentUpdate.scores).toEqual({ lead_capture: 4, invoicing: 1 });
-  });
-
-  it("ignores scores outside 1-5 and preserves existing scores", () => {
-    const raw = JSON.stringify({
-      message: "ok",
-      assessment: { scores: { invoicing: 0, lead_capture: 6, booking: 3.7 } },
-    });
-    const out = parseChatResponse(raw, current());
-    expect(out).not.toBe(null);
-    // existing lead_capture: 2 is preserved, booking: 3.7 rounds to 4,
-    // out-of-range values are dropped
-    expect(out!.assessmentUpdate.scores).toEqual({ lead_capture: 2, booking: 4 });
-  });
-
-  it("extracts findings with severity defaulting to medium", () => {
+  it("extracts findings without severity (v2 dropped the field)", () => {
     const raw = JSON.stringify({
       message: "ok",
       assessment: {
         findings: [
-          { category: "invoicing", text: "manual invoicing is painful", severity: "high" },
+          { category: "invoicing", text: "manual invoicing is painful" },
           { category: "ops", text: "no job tracker" },
-          { category: "ops", text: "weird", severity: "bogus" },
-          { category: "ops" },
+          { category: "ops" }, // missing text — dropped (text is the load-bearing field)
+          { category: 42, text: "bad category falls back to ops" }, // bad category → "ops" fallback, kept
         ],
       },
     });
     const out = parseChatResponse(raw, current());
     expect(out).not.toBe(null);
     const findings = out!.assessmentUpdate.findings!;
-    // 4 inputs; the entry without text is dropped
+    // Only the missing-text entry is dropped; the bad-category entry
+    // keeps its text and falls back to category: "ops".
     expect(findings).toHaveLength(3);
-    expect(findings[0]).toEqual({
-      category: "invoicing",
-      text: "manual invoicing is painful",
-      severity: "high",
-    });
-    expect(findings[1]).toEqual({ category: "ops", text: "no job tracker", severity: "medium" });
-    expect(findings[2]).toEqual({ category: "ops", text: "weird", severity: "medium" });
+    expect(findings[0]).toEqual({ category: "invoicing", text: "manual invoicing is painful" });
+    expect(findings[1]).toEqual({ category: "ops", text: "no job tracker" });
+    expect(findings[2]).toEqual({ category: "ops", text: "bad category falls back to ops" });
   });
 
   it("tolerates assessment fields at the top level of the JSON", () => {
@@ -240,6 +208,33 @@ describe("parseChatResponse", () => {
     expect(parseChatResponse(filledRaw, current())!.assessmentUpdate.painPoints).toEqual(["x", "y"]);
   });
 
+  it("drops removed v1 fields (scores, categoriesCovered, currentCategory, budget, obstacles)", () => {
+    // The v1 LLM may have leaked scores / categoriesCovered etc. The v2
+    // parser ignores them — they never reach the assessment update.
+    const raw = JSON.stringify({
+      message: "ok",
+      scores: { lead_capture: 4 },
+      categoriesCovered: ["lead_capture"],
+      currentCategory: "lead_capture",
+      budget: "500/mo",
+      obstacles: "no time",
+      assessment: {
+        scores: { invoicing: 3 },
+        categoriesCovered: ["invoicing"],
+        budget: "500/mo",
+        obstacles: "no time",
+      },
+    });
+    const out = parseChatResponse(raw, current());
+    expect(out).not.toBe(null);
+    const update = out!.assessmentUpdate as Record<string, unknown>;
+    expect(update.scores).toBeUndefined();
+    expect(update.categoriesCovered).toBeUndefined();
+    expect(update.currentCategory).toBeUndefined();
+    expect(update.budget).toBeUndefined();
+    expect(update.obstacles).toBeUndefined();
+  });
+
   it("handles real-shape output with think block + code fence + prose", () => {
     const raw =
       "<think>The user greeted me, I should ask Q1 now.</think>\n" +
@@ -247,14 +242,11 @@ describe("parseChatResponse", () => {
       JSON.stringify({
         message: "hey, ready when you are — what's the business called and what do you do?",
         currentQuestion: 1,
-        currentCategory: "lead_capture",
         assessment: {
           businessName: "",
-          scores: {},
           painPoints: [],
           manualTasks: [],
           findings: [],
-          categoriesCovered: [],
           readyForEmail: false,
         },
       }, null, 2) +
@@ -265,7 +257,6 @@ describe("parseChatResponse", () => {
       "hey, ready when you are — what's the business called and what do you do?"
     );
     expect(out!.currentQuestion).toBe(1);
-    expect(out!.currentCategory).toBe("lead_capture");
   });
 
   it("falls back to prose when only a think block is present", () => {

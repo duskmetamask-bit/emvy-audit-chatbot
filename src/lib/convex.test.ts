@@ -21,10 +21,10 @@ describe("callConvexQuery", () => {
   });
 
   it("POSTs to /api/query with the right body shape and returns the value", async () => {
-    const mock = makeFetchMock(200, { status: "success", value: { scoreLabel: "Good", week1: ["a"] } });
+    const mock = makeFetchMock(200, { status: "success", value: { businessName: "Dusk Plumbing", week1: ["a"] } });
     setFetch(mock);
 
-    const result = await callConvexQuery<{ scoreLabel: string; week1: string[] }>({
+    const result = await callConvexQuery<{ businessName: string; week1: string[] }>({
       functionName: "audit_chatbot_leads:get",
       args: { id: "abc-123" },
     });
@@ -38,7 +38,7 @@ describe("callConvexQuery", () => {
       args: { id: "abc-123" },
       format: "json",
     });
-    expect(result).toEqual({ scoreLabel: "Good", week1: ["a"] });
+    expect(result).toEqual({ businessName: "Dusk Plumbing", week1: ["a"] });
   });
 
   it("returns null when Convex responds with a null value (e.g., row not found)", async () => {

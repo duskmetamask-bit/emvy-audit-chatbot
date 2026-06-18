@@ -9,13 +9,14 @@
 import { Agent } from "agents";
 
 export interface Env {
-  AUDIT_AGENT: DurableObjectNamespace;
+  AUDIT_AGENT: DurableObjectNamespace<AuditAgent>;
+  // Vars (set in wrangler.toml [vars])
+  CONVEX_URL: "https://glad-camel-940.convex.cloud";
+  SUPABASE_URL: "https://rrjktvvnzjzlfquaghut.supabase.co";
+  VERCEL_REPORT_URL?: string;
   // Secrets (set via `wrangler secret put`)
   MINIMAX_API_KEY?: string;
   SUPABASE_ANON_KEY?: string;
-  // Vars (set in wrangler.toml [vars])
-  SUPABASE_URL?: string;
-  VERCEL_REPORT_URL?: string;
 }
 
 // Assessment shape — mirrors src/lib/agent.ts (kept in sync; the report

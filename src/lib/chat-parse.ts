@@ -4,16 +4,24 @@
 // response often leaks reasoning blocks, prose prefixes, and code fences
 // around that JSON — these helpers normalise the input before the route
 // passes anything to the client.
+//
+// v2 (2026-06-18): assessment no longer carries scores, categoriesCovered,
+// currentCategory, budget, or obstacles. Findings no longer carry severity.
+// currentQuestion caps at TOTAL_QUESTIONS (10) instead of the old 20.
 
 import type { Assessment, Finding } from "./agent";
+import { TOTAL_QUESTIONS } from "./agent";
 
-// Strip the model's reasoning blocks. M2.7 emits `<think>…</think>`
-// blocks inline with the response. We want only the actual reply.
+// Strip the model's reasoning blocks. M2.7 emits `think…/think` (or the
+// `?`-tagged variant) inline with the response. We want only the actual
+// reply. Order matters: handle the explicit <thinking>/<reasoning> tags
+// first, then the bare think block. The `\b` after `think` ensures the
+// bare match doesn't reach into `<thinking>` content.
 export function stripThinkBlocks(raw: string): string {
   return raw
-    .replace(/<think>[\s\S]*?<\/think>/gi, "")
     .replace(/<thinking>[\s\S]*?<\/thinking>/gi, "")
     .replace(/<reasoning>[\s\S]*?<\/reasoning>/gi, "")
+    .replace(/<think\b[^>]*>[\s\S]*?<\/think\s*>/gi, "")
     .trim();
 }
 
@@ -71,39 +79,32 @@ function asStringArray(v: unknown): string[] {
   return v.filter((x): x is string => typeof x === "string" && x.trim().length > 0);
 }
 
-const SEVERITIES = ["high", "medium", "low"] as const;
-type Severity = (typeof SEVERITIES)[number];
-function asSeverity(v: unknown): Severity {
-  return SEVERITIES.includes(v as Severity) ? (v as Severity) : "medium";
-}
-
 export interface ParsedChatResponse {
   // The plain-text reply the user should see.
   message: string;
   // The updated assessment fields (without the message, without the
   // currentQuestion which the route adds from the prior turn).
   assessmentUpdate: Partial<Assessment>;
-  // The current question number (1-indexed) and category the LLM
-  // declared it was asking, if it set them. The route trusts these to
-  // drive the question counter in the UI.
+  // The current question number (1-indexed) the LLM declared it was
+  // asking, if it set one. The route trusts this to drive the question
+  // counter in the UI.
   currentQuestion?: number;
-  currentCategory?: string;
 }
 
 // Parse the LLM's raw response into a structured form. Tolerant of
 // prose prefixes/suffixes, code fences, and think blocks. The MiniMax
-// M2.7 model frequently emits a <think>…</think> block followed by
-// plain text without a JSON envelope — in that case we fall back to
-// using the cleaned prose as the message, and bump currentQuestion
-// from the prior turn so the UI still advances.
+// M2.7 model frequently emits a think block followed by plain text
+// without a JSON envelope — in that case we fall back to using the
+// cleaned prose as the message and let the route advance the counter
+// from prior turn state.
 export function parseChatResponse(raw: string, current: Assessment): ParsedChatResponse | null {
   const cleaned = stripCodeFences(stripThinkBlocks(raw));
   const json = extractJsonObject(cleaned);
 
   // Fallback path: the model emitted a think block + plain text, with
   // no JSON envelope. Use the cleaned prose as the message and let the
-  // route advance the question counter. This keeps the chat alive
-  // even when the model forgets the JSON contract.
+  // route advance the question counter. Keeps the chat alive even when
+  // the model forgets the JSON contract.
   if (!json) {
     const prose = cleaned.trim();
     if (!prose) return null;
@@ -111,7 +112,6 @@ export function parseChatResponse(raw: string, current: Assessment): ParsedChatR
       message: prose,
       assessmentUpdate: {},
       currentQuestion: undefined,
-      currentCategory: undefined,
     };
   }
 
@@ -129,7 +129,6 @@ export function parseChatResponse(raw: string, current: Assessment): ParsedChatR
       message: prose,
       assessmentUpdate: {},
       currentQuestion: undefined,
-      currentCategory: undefined,
     };
   }
   if (!parsed || typeof parsed !== "object") return null;
@@ -152,12 +151,8 @@ export function parseChatResponse(raw: string, current: Assessment): ParsedChatR
   if (industry) update.industry = industry;
   const aiTools = asString(a.aiTools);
   if (aiTools) update.aiTools = aiTools;
-  const budget = asString(a.budget);
-  if (budget) update.budget = budget;
   const goal = asString(a.goal);
   if (goal) update.goal = goal;
-  const obstacles = asString(a.obstacles);
-  if (obstacles) update.obstacles = obstacles;
   if (typeof a.readyForEmail === "boolean") update.readyForEmail = a.readyForEmail;
 
   const painPoints = asStringArray(a.painPoints);
@@ -173,27 +168,12 @@ export function parseChatResponse(raw: string, current: Assessment): ParsedChatR
         const text = asString(o.text);
         if (!text) return null;
         return {
-          category: (asString(o.category) || "ops") as Finding["category"],
+          category: asString(o.category) ?? "ops",
           text,
-          severity: asSeverity(o.severity),
         };
       })
       .filter((f): f is Finding => f !== null);
     if (findings.length) update.findings = findings;
-  }
-
-  if (a.scores && typeof a.scores === "object") {
-    const merged: Record<string, number> = { ...current.scores };
-    for (const [k, v] of Object.entries(a.scores as Record<string, unknown>)) {
-      const n = Number(v);
-      if (!Number.isNaN(n) && n >= 1 && n <= 5) merged[k] = Math.round(n);
-    }
-    update.scores = merged;
-  }
-
-  const categoriesCovered = asStringArray(a.categoriesCovered);
-  if (categoriesCovered.length) {
-    update.categoriesCovered = categoriesCovered as Assessment["categoriesCovered"];
   }
 
   // The conversational reply. Prefer the explicit `message` field on
@@ -207,24 +187,21 @@ export function parseChatResponse(raw: string, current: Assessment): ParsedChatR
     message = before || after || "";
   }
 
-  // currentQuestion / currentCategory live at the top level of the JSON
-  // (per the audit system prompt), not inside the assessment object. But
-  // tolerate either shape for resilience.
+  // currentQuestion lives at the top level of the JSON (per the audit
+  // system prompt), not inside the assessment object. But tolerate
+  // either shape for resilience.
   const top = parsed;
   let currentQuestion: number | undefined;
   const cq = top.currentQuestion ?? a.currentQuestion;
   if (typeof cq === "number" && Number.isFinite(cq)) {
-    // 20 = the audit-v4 cap: 13 spine questions + up to 7 follow-ups
-    // on a single category. The UI clamps the displayed number back
-    // down for the header chip.
-    currentQuestion = Math.max(1, Math.min(20, Math.round(cq)));
+    // Cap at TOTAL_QUESTIONS (1-10). Follow-ups stay on the same
+    // currentQuestion; the LLM is told not to advance it.
+    currentQuestion = Math.max(1, Math.min(TOTAL_QUESTIONS, Math.round(cq)));
   }
-  const currentCategory = asString(top.currentCategory) ?? asString(a.currentCategory);
 
   return {
     message: message.trim(),
     assessmentUpdate: update,
     currentQuestion,
-    currentCategory,
   };
 }
