@@ -14,6 +14,7 @@
 import { NextRequest } from "next/server";
 import { REPORT_SYSTEM_PROMPT, STAGE_PLAN, Assessment, emptyAssessment } from "@/lib/agent";
 import { chatCompletionStream, ChatMessage } from "@/lib/llm";
+import { extractJsonObject, stripThinkBlocks } from "@/lib/chat-parse";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -137,70 +138,102 @@ function deriveFallbackRoadmap(assessment: Assessment, lead: ReportRequestBody):
   };
 }
 
+// M2.7 sometimes emits the same key twice in a row, e.g.
+//   {"actions": [...], "actions": [...], "actions": [...]}
+// instead of a single {"actions": [..., ..., ...]}. This is non-strict
+// JSON (duplicate keys) and JSON.parse rejects it. Walk the raw text
+// and merge any duplicate "actions" arrays within the same parent object
+// before handing to JSON.parse.
+function mergeDuplicateActionsKeys(raw: string): string {
+  // Match patterns like: "actions": [...],?  repeated, with no other
+  // key between them. Captures the inner arrays. We rebuild the
+  // surrounding object by splitting on these clusters.
+  // Conservative: only act on consecutive "actions" keys inside what
+  // looks like an object body (between { and }, surrounded by , or {).
+  return raw.replace(
+    /("actions"\s*:\s*\[[^\]]*\])(?:\s*,\s*"actions"\s*:\s*\[[^\]]*\])+/g,
+    (match) => {
+      // Collect every [...] that follows "actions":
+      const arrs: string[] = [];
+      const re = /"actions"\s*:\s*(\[[^\]]*\])/g;
+      let m: RegExpExecArray | null;
+      while ((m = re.exec(match)) !== null) arrs.push(m[1]);
+      return `"actions": ${arrs.join(", ")}`;
+    }
+  );
+}
+
 function parseRoadmap(raw: string): RoadmapData | null {
-  const cleaned = stripCodeFences(raw);
-  const first = cleaned.indexOf("{");
-  const last = cleaned.lastIndexOf("}");
-  if (first === -1 || last === -1) return null;
+  // 1. Strip think blocks (M2.7 emits <think>…</think> inline) so the
+  //    JSON extractor doesn't see a `{` inside the reasoning.
+  // 2. Strip code fences.
+  // 3. Walk balanced braces to find the actual JSON object (avoids
+  //    `indexOf("{")` pointing at a brace in a think-block string the
+  //    parser missed, or `lastIndexOf("}")` pointing at a brace in
+  //    narrative text after the JSON).
+  // 4. Repair the duplicate-"actions" LLM slip above. After this
+  //    JSON.parse can usually succeed.
+  const cleaned = mergeDuplicateActionsKeys(stripCodeFences(stripThinkBlocks(raw)));
+  const json = extractJsonObject(cleaned);
+  if (!json) return null;
+
+  let parsed: Record<string, unknown>;
   try {
-    const parsed = JSON.parse(cleaned.slice(first, last + 1));
-    if (!parsed || typeof parsed !== "object") return null;
-
-    const asArray = (v: unknown): string[] =>
-      Array.isArray(v) ? v.filter((x): x is string => typeof x === "string" && x.trim().length > 0) : [];
-
-    const asOpportunities = (v: unknown): RoadmapOpportunity[] => {
-      if (!Array.isArray(v)) return [];
-      return v
-        .filter((x): x is Record<string, unknown> => x !== null && typeof x === "object")
-        .map((x): RoadmapOpportunity | null => {
-          if (
-            typeof x.title !== "string" ||
-            typeof x.whatItIs !== "string" ||
-            typeof x.whyMatters !== "string" ||
-            typeof x.whatChanges !== "string" ||
-            typeof x.howFast !== "string"
-          ) {
-            return null;
-          }
-          return {
-            title: x.title.trim(),
-            whatItIs: x.whatItIs.trim(),
-            whyMatters: x.whyMatters.trim(),
-            whatChanges: x.whatChanges.trim(),
-            howFast: x.howFast.trim(),
-          };
-        })
-        .filter((o): o is RoadmapOpportunity => o !== null && o.title.length > 0);
-    };
-
-    const asPhases = (v: unknown): RoadmapPhase[] => {
-      if (!Array.isArray(v)) return [];
-      return v
-        .filter((x): x is Record<string, unknown> => x !== null && typeof x === "object")
-        .map((x): RoadmapPhase | null => {
-          if (typeof x.title !== "string" || !Array.isArray(x.actions)) return null;
-          const actions = x.actions.filter(
-            (a): a is string => typeof a === "string" && a.trim().length > 0
-          );
-          if (actions.length === 0) return null;
-          return { title: x.title.trim(), actions };
-        })
-        .filter((p): p is RoadmapPhase => p !== null);
-    };
-
-    return {
-      businessName: typeof parsed.businessName === "string" ? parsed.businessName : "",
-      industry: typeof parsed.industry === "string" ? parsed.industry : "your sector",
-      summary: typeof parsed.summary === "string" ? parsed.summary : "",
-      opportunities: asOpportunities(parsed.opportunities),
-      quickWin: typeof parsed.quickWin === "string" ? parsed.quickWin : "",
-      first90Days: asPhases(parsed.first90Days),
-      nextStep: typeof parsed.nextStep === "string" ? parsed.nextStep : "",
-    };
+    parsed = JSON.parse(json) as Record<string, unknown>;
   } catch {
     return null;
   }
+  if (!parsed || typeof parsed !== "object") return null;
+
+  const asOpportunities = (v: unknown): RoadmapOpportunity[] => {
+    if (!Array.isArray(v)) return [];
+    return v
+      .filter((x): x is Record<string, unknown> => x !== null && typeof x === "object")
+      .map((x): RoadmapOpportunity | null => {
+        if (
+          typeof x.title !== "string" ||
+          typeof x.whatItIs !== "string" ||
+          typeof x.whyMatters !== "string" ||
+          typeof x.whatChanges !== "string" ||
+          typeof x.howFast !== "string"
+        ) {
+          return null;
+        }
+        return {
+          title: x.title.trim(),
+          whatItIs: x.whatItIs.trim(),
+          whyMatters: x.whyMatters.trim(),
+          whatChanges: x.whatChanges.trim(),
+          howFast: x.howFast.trim(),
+        };
+      })
+      .filter((o): o is RoadmapOpportunity => o !== null && o.title.length > 0);
+  };
+
+  const asPhases = (v: unknown): RoadmapPhase[] => {
+    if (!Array.isArray(v)) return [];
+    return v
+      .filter((x): x is Record<string, unknown> => x !== null && typeof x === "object")
+      .map((x): RoadmapPhase | null => {
+        if (typeof x.title !== "string" || !Array.isArray(x.actions)) return null;
+        const actions = x.actions.filter(
+          (a): a is string => typeof a === "string" && a.trim().length > 0
+        );
+        if (actions.length === 0) return null;
+        return { title: x.title.trim(), actions };
+      })
+      .filter((p): p is RoadmapPhase => p !== null);
+  };
+
+  return {
+    businessName: typeof parsed.businessName === "string" ? parsed.businessName : "",
+    industry: typeof parsed.industry === "string" ? parsed.industry : "your sector",
+    summary: typeof parsed.summary === "string" ? parsed.summary : "",
+    opportunities: asOpportunities(parsed.opportunities),
+    quickWin: typeof parsed.quickWin === "string" ? parsed.quickWin : "",
+    first90Days: asPhases(parsed.first90Days),
+    nextStep: typeof parsed.nextStep === "string" ? parsed.nextStep : "",
+  };
 }
 
 function sseEvent(event: string, data: unknown): string {
@@ -230,8 +263,22 @@ export async function POST(req: NextRequest) {
     });
   }
 
+  // JSON-only reminder: M2.7 sometimes emits invalid JSON (e.g.
+  // duplicate `"actions"` keys) or wraps the JSON in a think block.
+  // The reminder primes the contract before the model sees the user
+  // request. Pair with the more tolerant parseRoadmap below so even a
+  // slip lands the report.
   const messages: ChatMessage[] = [
     { role: "system" as const, content: REPORT_SYSTEM_PROMPT },
+    {
+      role: "system",
+      content:
+        "REMINDER: respond ONLY with a single JSON object. First char `{`, last char `}`. " +
+        "No prose outside the braces. No `think` blocks. No reasoning. No code fences. " +
+        "CRITICAL SCHEMA NOTES: each `actions` field is a SINGLE array with 3 string elements, " +
+        "not 3 separate `actions` keys. Each `opportunities` entry is a SINGLE object with 5 " +
+        "string fields (title, whatItIs, whyMatters, whatChanges, howFast). No duplicate keys.",
+    },
     {
       role: "user" as const,
       content:
@@ -274,7 +321,14 @@ export async function POST(req: NextRequest) {
         for await (const delta of chatCompletionStream({
           messages,
           temperature: 0.6,
-          maxTokens: 2400,
+          // Bumped from 2400 → 4096. M2.7 emits a long think block
+          // (~1500-2000 tokens) before the JSON, then needs ~2000
+          // tokens for the actual 5-section report. 2400 was cutting
+          // the JSON off mid-stream and the parser was rejecting the
+          // truncated output, so users were getting the generic
+          // boilerplate fallback. 4096 fits the think block + a full
+          // report with breathing room.
+          maxTokens: 4096,
         })) {
           fullText += delta;
           // Send raw deltas too — the frontend can ignore them, but
