@@ -6,10 +6,11 @@
 // show "Building your roadmap..." stages in real-time, then fade the
 // final report in as the data lands. Beats a static spinner.
 //
-// v2 (2026-06-18): report shape changed. Now 5 sections — Strategy
+// v3 (2026-06-19): report shape changed. Now 5 sections — Strategy
 // Summary, 3 Opportunities (each with title + 4 sub-fields), Quick Win,
-// First 90 Days (3 phases with title + actions[]), What to Do Next. No
-// scores, no findings/severity block.
+// 30-Day Checklist (5-7 verb-first string items, no phasing), What to
+// Do Next. Dropped the 30/60/90 phasing from v2 — user pushed back
+// as padding. One window: 30 days.
 
 import { NextRequest } from "next/server";
 import { REPORT_SYSTEM_PROMPT, STAGE_PLAN, Assessment, emptyAssessment } from "@/lib/agent";
@@ -34,18 +35,13 @@ interface RoadmapOpportunity {
   howFast: string;
 }
 
-interface RoadmapPhase {
-  title: string;
-  actions: string[];
-}
-
 interface RoadmapData {
   businessName: string;
   industry: string;
   summary: string;
   opportunities: RoadmapOpportunity[];
   quickWin: string;
-  first90Days: RoadmapPhase[];
+  checklist: string[];
   nextStep: string;
 }
 
@@ -108,31 +104,14 @@ function deriveFallbackRoadmap(assessment: Assessment, lead: ReportRequestBody):
     summary: `${businessName} has a clear next move: ${opportunities[0].title.toLowerCase()}. Ship the quick win this week, then sequence the next two opportunities over the following 90 days.`,
     opportunities,
     quickWin: "Pick one recurring task that takes 30+ minutes a week and automate it — even a rough version is a win this week.",
-    first90Days: [
-      {
-        title: "First 30 days",
-        actions: [
-          "List every recurring task that takes more than 30 minutes a week and rank them by pain.",
-          `Pick the single most painful one — that's your week 1 target: ${opportunities[0].whatItIs}`,
-          "Set up a shared Notion or Google Doc so the team can see the roadmap.",
-        ],
-      },
-      {
-        title: "Next 30 days",
-        actions: [
-          "Ship the week 1 automation end-to-end. Measure the time it frees up.",
-          "Set up automated invoice or follow-up reminders if cashflow or lead response is leaking.",
-          "Brief the team on a lightweight AI policy — what's allowed, what's reviewed.",
-        ],
-      },
-      {
-        title: "Days 60-90",
-        actions: [
-          "Layer AI into the next-priority workflow (lead qualification, reporting, or scheduling).",
-          "Move to a weekly AI review cadence — what's working, what to retire, what to try next.",
-          "Plan a quarterly review checkpoint to keep the roadmap honest as the business shifts.",
-        ],
-      },
+    checklist: [
+      `List every recurring task that takes more than 30 minutes a week and rank them by pain — the top item is your week 1 target: ${opportunities[0].whatItIs}`,
+      "Set up a shared Notion or Google Doc so the team can see the roadmap.",
+      "Ship the week 1 automation end-to-end and measure the time it frees up.",
+      "Set up automated invoice or follow-up reminders if cashflow or lead response is leaking (Zapier or Make + Resend).",
+      "Brief the team on a lightweight AI policy — what's allowed, what's reviewed.",
+      "Layer AI into the next-priority workflow (lead qualification, reporting, or scheduling) — Hermes is the right shape for multi-step reasoning loops.",
+      "Move to a weekly AI review cadence — what's working, what to retire, what to try next.",
     ],
     nextStep: `Book a free 15-min discovery call with EMVY and we'll map the exact automations to ${businessName}, sequence them by ROI, and ship the first one inside two weeks. https://emvyai.com/services/discovery-call`,
   };
@@ -210,19 +189,11 @@ function parseRoadmap(raw: string): RoadmapData | null {
       .filter((o): o is RoadmapOpportunity => o !== null && o.title.length > 0);
   };
 
-  const asPhases = (v: unknown): RoadmapPhase[] => {
+  const asChecklist = (v: unknown): string[] => {
     if (!Array.isArray(v)) return [];
     return v
-      .filter((x): x is Record<string, unknown> => x !== null && typeof x === "object")
-      .map((x): RoadmapPhase | null => {
-        if (typeof x.title !== "string" || !Array.isArray(x.actions)) return null;
-        const actions = x.actions.filter(
-          (a): a is string => typeof a === "string" && a.trim().length > 0
-        );
-        if (actions.length === 0) return null;
-        return { title: x.title.trim(), actions };
-      })
-      .filter((p): p is RoadmapPhase => p !== null);
+      .filter((a): a is string => typeof a === "string" && a.trim().length > 0)
+      .map((a) => a.trim());
   };
 
   return {
@@ -231,7 +202,7 @@ function parseRoadmap(raw: string): RoadmapData | null {
     summary: typeof parsed.summary === "string" ? parsed.summary : "",
     opportunities: asOpportunities(parsed.opportunities),
     quickWin: typeof parsed.quickWin === "string" ? parsed.quickWin : "",
-    first90Days: asPhases(parsed.first90Days),
+    checklist: asChecklist(parsed.checklist),
     nextStep: typeof parsed.nextStep === "string" ? parsed.nextStep : "",
   };
 }

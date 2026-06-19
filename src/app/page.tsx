@@ -5,7 +5,7 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { EmvyLogo, EmvyWordmark } from "@/components/EmvyLogo";
 import { BuildTheater, BuildStage } from "@/components/BuildTheater";
-import { RoadmapSection } from "@/components/RoadmapSection";
+import { ChecklistSection } from "@/components/ChecklistSection";
 import { callConvexMutation, callConvexQuery } from "@/lib/convex";
 import { TOTAL_QUESTIONS } from "@/lib/agent";
 import {
@@ -158,8 +158,8 @@ export default function AuditChatbot() {
             ? (row.opportunities as ReportData["opportunities"])
             : [],
           quickWin: typeof row.quickWin === "string" ? row.quickWin : "",
-          first90Days: Array.isArray(row.first90Days)
-            ? (row.first90Days as ReportData["first90Days"])
+          checklist: Array.isArray(row.checklist)
+            ? (row.checklist as ReportData["checklist"])
             : [],
           nextStep: typeof row.nextStep === "string" ? row.nextStep : "",
         };
@@ -474,7 +474,7 @@ export default function AuditChatbot() {
               summary: r.summary,
               opportunities: r.opportunities,
               quickWin: r.quickWin,
-              first90Days: r.first90Days,
+              checklist: r.checklist,
               nextStep: r.nextStep,
             },
           }).catch((err) => console.error("Convex report backfill failed:", err));
@@ -1317,21 +1317,8 @@ function ReportStage({
       {/* Quick Win */}
       {report.quickWin && <QuickWinCallout quickWin={report.quickWin} />}
 
-      {/* First 90 Days — 3 phases */}
-      <div style={{ display: "flex", flexDirection: "column", gap: 16, marginBottom: 32 }}>
-        <div className="label-eyebrow-accent" style={{ marginBottom: 4 }}>
-          Your first 90 days
-        </div>
-        {report.first90Days.map((p, i) => (
-          <RoadmapSection
-            key={`p${i}`}
-            eyebrow={i === 0 ? "FIRST 30 DAYS" : i === 1 ? "NEXT 30 DAYS" : "DAYS 60–90"}
-            title={p.title}
-            actions={p.actions}
-            index={i + 1}
-          />
-        ))}
-      </div>
+      {/* 30-Day Checklist — flat list of verb-first actions */}
+      <ChecklistSection items={report.checklist} />
 
       {/* Closer — What to do next (LLM's nextStep) */}
       {report.nextStep && (

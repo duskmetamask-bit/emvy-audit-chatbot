@@ -115,8 +115,9 @@ describe("emptyAssessment", () => {
 
 describe("REPORT_SYSTEM_PROMPT", () => {
   it("requires the 5-section envelope shape", () => {
-    // The v2 report is: summary, opportunities, quickWin, first90Days, nextStep.
-    for (const key of ["summary", "opportunities", "quickWin", "first90Days", "nextStep"]) {
+    // The v3 report is: summary, opportunities, quickWin, checklist, nextStep.
+    // `checklist` replaces `first90Days` from v2 — flat string[], no phasing.
+    for (const key of ["summary", "opportunities", "quickWin", "checklist", "nextStep"]) {
       expect(REPORT_SYSTEM_PROMPT).toContain(`"${key}"`);
     }
   });
@@ -128,10 +129,19 @@ describe("REPORT_SYSTEM_PROMPT", () => {
     }
   });
 
-  it("specifies the 3 first90Days phases in order", () => {
-    expect(REPORT_SYSTEM_PROMPT).toContain("First 30 days");
-    expect(REPORT_SYSTEM_PROMPT).toContain("Next 30 days");
-    expect(REPORT_SYSTEM_PROMPT).toContain("Days 60-90");
+  it("specifies the flat 30-day checklist (no 30/60/90 phasing)", () => {
+    expect(REPORT_SYSTEM_PROMPT).toContain("checklist");
+    expect(REPORT_SYSTEM_PROMPT).toContain("30 days");
+    expect(REPORT_SYSTEM_PROMPT).toContain("5-7 string items");
+    // v3 explicitly drops the 3-phase phasing. Guard against regression
+    // back to the v2 shape.
+    expect(REPORT_SYSTEM_PROMPT).not.toContain("Days 60-90");
+  });
+
+  it("names Hermes as an available tool", () => {
+    // Hermes is EMVY's own agent platform — recommended in v3 for
+    // multi-step reasoning loops (e.g. lead follow-up, scheduling).
+    expect(REPORT_SYSTEM_PROMPT).toContain("Hermes");
   });
 
   it("lets the LLM pick between EMVY CTA and honest 'come back when'", () => {

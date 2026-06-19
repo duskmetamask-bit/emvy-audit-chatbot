@@ -57,10 +57,14 @@ function fullReport(): ReportData {
       },
     ],
     quickWin: "This week: stop chasing payments by phone. Pick your top 5 outstanding invoices and call each one ONCE — after that, automate.",
-    first90Days: [
-      { title: "First 30 days", actions: ["Audit recurring copy-paste work", "Set up roadmap doc", "Pick 1 to automate"] },
-      { title: "Next 30 days", actions: ["Ship week 1 target", "Set up invoice reminders", "Brief team on AI policy"] },
-      { title: "Days 60-90", actions: ["Layer AI into lead pipeline", "Weekly AI review cadence", "Quarterly roadmap refresh"] },
+    checklist: [
+      "Audit your recurring copy-paste work and rank by pain — top item is your week 1 target.",
+      "Set up a shared Notion or Google Doc so the team can see the roadmap.",
+      "Ship the week 1 automation end-to-end and measure the time it frees up.",
+      "Wire Xero to Zapier to Resend so unpaid invoices trigger a reminder at days 3, 7, and 14 — cuts collections cycle by ~40%.",
+      "Brief the team on a lightweight AI policy — what's allowed, what's reviewed.",
+      "Layer AI into the next-priority workflow — Hermes is the right shape for multi-step lead follow-up.",
+      "Move to a weekly AI review cadence — what's working, what to retire, what to try next.",
     ],
     nextStep: "Book a free 15-min discovery call with EMVY at https://emvyai.com/services/discovery-call!",
   };
@@ -68,7 +72,7 @@ function fullReport(): ReportData {
 
 function fullState(): AuditState {
   return {
-    version: 2,
+    version: 3,
     stage: "report",
     messages: [
       { role: "bot", content: "hey, ready when you are", timestamp: "09:00:00" },
@@ -153,9 +157,10 @@ describe("parseAuditState", () => {
   it("rejects version mismatches (forward-compat safety)", () => {
     const base = fullState();
     expect(parseAuditState({ ...base, version: 1 })).toBe(null); // stale v1 on disk
-    expect(parseAuditState({ ...base, version: 3 })).toBe(null); // future
+    expect(parseAuditState({ ...base, version: 2 })).toBe(null); // stale v2
+    expect(parseAuditState({ ...base, version: 4 })).toBe(null); // future
     expect(parseAuditState({ ...base, version: 0 })).toBe(null);
-    expect(parseAuditState({ ...base, version: "2" })).toBe(null);
+    expect(parseAuditState({ ...base, version: "3" })).toBe(null);
     expect(parseAuditState({ ...base, version: undefined })).toBe(null);
   });
 
@@ -235,20 +240,18 @@ describe("parseAuditState", () => {
     expect(parseAuditState({ ...base, report: { ...fullReport(), opportunities: "not an array" } })).toBe(null);
     // quickWin not a string
     expect(parseAuditState({ ...base, report: { ...fullReport(), quickWin: 99 } })).toBe(null);
-    // bad phase — actions not an array of strings
+    // bad checklist — not a string
     expect(
       parseAuditState({
         ...base,
         report: {
           ...fullReport(),
-          first90Days: [
-            { title: "First 30 days", actions: ["ok", 99, "ok"] },
-          ],
+          checklist: ["ok", 99, "ok"],
         },
       })
     ).toBe(null);
-    // first90Days not an array
-    expect(parseAuditState({ ...base, report: { ...fullReport(), first90Days: "nope" } })).toBe(null);
+    // checklist not an array
+    expect(parseAuditState({ ...base, report: { ...fullReport(), checklist: "nope" } })).toBe(null);
     // missing businessName
     expect(parseAuditState({ ...base, report: { ...fullReport(), businessName: undefined } })).toBe(null);
     // missing summary
@@ -396,14 +399,14 @@ describe("storage I/O", () => {
 
     const mod = await import("./use-audit-store");
     mod.writePatch({ stage: "chat", sessionId: "abc" });
-    expect(memStorage.getItem("emvy-audit-state:v2")).not.toBeNull();
-    const written = JSON.parse(memStorage.getItem("emvy-audit-state:v2") as string);
+    expect(memStorage.getItem("emvy-audit-state:v3")).not.toBeNull();
+    const written = JSON.parse(memStorage.getItem("emvy-audit-state:v3") as string);
     expect(written.stage).toBe("chat");
     expect(written.sessionId).toBe("abc");
-    expect(written.version).toBe(2);
+    expect(written.version).toBe(3);
 
     mod.writeClear();
-    expect(memStorage.getItem("emvy-audit-state:v2")).toBeNull();
+    expect(memStorage.getItem("emvy-audit-state:v3")).toBeNull();
   });
 
   it("writePatch merges with the existing state instead of overwriting", async () => {
@@ -419,16 +422,16 @@ describe("storage I/O", () => {
     const mod = await import("./use-audit-store");
     mod.writePatch({ stage: "chat", name: "Jake" });
     mod.writePatch({ sessionId: "sess-1" });
-    const written = JSON.parse(memStorage.getItem("emvy-audit-state:v2") as string);
+    const written = JSON.parse(memStorage.getItem("emvy-audit-state:v3") as string);
     expect(written.stage).toBe("chat");
     expect(written.name).toBe("Jake");
     expect(written.sessionId).toBe("sess-1");
   });
 
-  it("writePatch always writes version: 2, even if a stale payload is on disk", async () => {
+  it("writePatch always writes version: 3, even if a stale payload is on disk", async () => {
     const memStorage = makeMemoryStorage();
-    // Seed a corrupt payload — writePatch should still produce a valid v2.
-    memStorage.setItem("emvy-audit-state:v2", "{ not json");
+    // Seed a corrupt payload — writePatch should still produce a valid v3.
+    memStorage.setItem("emvy-audit-state:v3", "{ not json");
     (globalThis as Record<string, unknown>).window = {
       localStorage: memStorage,
       dispatchEvent: vi.fn(),
@@ -439,8 +442,8 @@ describe("storage I/O", () => {
 
     const mod = await import("./use-audit-store");
     mod.writePatch({ stage: "email" });
-    const written = JSON.parse(memStorage.getItem("emvy-audit-state:v2") as string);
-    expect(written.version).toBe(2);
+    const written = JSON.parse(memStorage.getItem("emvy-audit-state:v3") as string);
+    expect(written.version).toBe(3);
     expect(written.stage).toBe("email");
   });
 
@@ -460,7 +463,7 @@ describe("storage I/O", () => {
     expect(dispatchEvent).toHaveBeenCalled();
     const event = dispatchEvent.mock.calls[0]?.[0] as StorageEvent;
     expect(event.type).toBe("storage");
-    expect(event.key).toBe("emvy-audit-state:v2");
+    expect(event.key).toBe("emvy-audit-state:v3");
   });
 
   it("writePatch swallows quota-exceeded / private-mode setItem errors silently", async () => {
@@ -498,8 +501,8 @@ describe("EMPTY_AUDIT_STATE", () => {
     expect(EMPTY_AUDIT_STATE.assessment.currentQuestion).toBe(0);
   });
 
-  it("has a v2 version stamp", () => {
-    expect(EMPTY_AUDIT_STATE.version).toBe(2);
+  it("has a v3 version stamp", () => {
+    expect(EMPTY_AUDIT_STATE.version).toBe(3);
   });
 
   it("has null report + null chatbotLeadId + reportSent === false", () => {

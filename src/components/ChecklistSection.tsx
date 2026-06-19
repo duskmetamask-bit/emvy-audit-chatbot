@@ -2,14 +2,16 @@
 
 import * as React from "react";
 
-type RoadmapSectionProps = {
-  eyebrow: string;
-  title: string;
-  actions: string[];
-  index: number;
+type ChecklistSectionProps = {
+  items: string[];
 };
 
-export function RoadmapSection({ eyebrow, title, actions, index }: RoadmapSectionProps) {
+// The 30-day checklist. Replaces the old 30/60/90 phasing — one
+// ordered list of verb-first actions, each naming a specific tool,
+// citing what the user said, and quantifying the outcome. Rendered
+// in the on-screen report and mirrored in the PDF (report-document.tsx).
+export function ChecklistSection({ items }: ChecklistSectionProps) {
+  if (items.length === 0) return null;
   return (
     <section
       style={{
@@ -18,8 +20,9 @@ export function RoadmapSection({ eyebrow, title, actions, index }: RoadmapSectio
         borderRadius: 16,
         padding: "clamp(20px, 3vw, 28px)",
         boxShadow: "var(--shadow-sm), var(--shadow-inset)",
+        marginBottom: 32,
         opacity: 0,
-        animation: `fadeUp var(--motion-slow) var(--ease-out) ${index * 120}ms forwards`,
+        animation: "fadeUp var(--motion-slow) var(--ease-out) 360ms forwards",
       }}
     >
       <div
@@ -27,15 +30,15 @@ export function RoadmapSection({ eyebrow, title, actions, index }: RoadmapSectio
           display: "flex",
           alignItems: "center",
           gap: 10,
-          marginBottom: 4,
+          marginBottom: 16,
         }}
       >
-        <span className="label-eyebrow-accent">{eyebrow}</span>
+        <span className="label-eyebrow-accent">YOUR 30-DAY CHECKLIST</span>
         <span
           className="label-meta"
           style={{ color: "var(--text-muted)" }}
         >
-          {String(index + 1).padStart(2, "0")} · {actions.length} actions
+          {String(items.length).padStart(2, "0")} actions
         </span>
       </div>
       <h2
@@ -47,7 +50,7 @@ export function RoadmapSection({ eyebrow, title, actions, index }: RoadmapSectio
           marginBottom: 18,
         }}
       >
-        {title}
+        What to ship in the next 30 days
       </h2>
       <ol
         style={{
@@ -59,15 +62,15 @@ export function RoadmapSection({ eyebrow, title, actions, index }: RoadmapSectio
           gap: 0,
         }}
       >
-        {actions.map((action, i) => (
-          <RoadmapAction key={i} action={action} index={i} />
+        {items.map((action, i) => (
+          <ChecklistItem key={i} action={action} index={i} />
         ))}
       </ol>
     </section>
   );
 }
 
-function RoadmapAction({ action, index }: { action: string; index: number }) {
+function ChecklistItem({ action, index }: { action: string; index: number }) {
   return (
     <li
       style={{

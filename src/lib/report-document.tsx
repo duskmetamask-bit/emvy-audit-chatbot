@@ -5,7 +5,7 @@
 //
 // v2 (2026-06-18): report shape changed. Now renders 5 sections —
 // cover (eyebrow + businessName + summary), 3 OpportunityCards, Quick
-// Win callout, 3 PhaseBlocks, closing nextStep. No findings block, no
+// Win callout, flat checklist, closing nextStep. No findings block, no
 // hardcoded dark CTA at the bottom (the LLM's `nextStep` is the closer).
 
 import React from "react";
@@ -27,18 +27,13 @@ export interface ReportOpportunity {
   howFast: string;
 }
 
-export interface ReportPhase {
-  title: string;
-  actions: string[];
-}
-
 export interface ReportData {
   businessName: string;
   industry: string;
   summary: string;
   opportunities: ReportOpportunity[];
   quickWin: string;
-  first90Days: ReportPhase[];
+  checklist: string[];
   nextStep: string;
 }
 
@@ -207,14 +202,14 @@ const styles = StyleSheet.create({
     color: COLORS.ink,
   },
 
-  // Phases
-  phaseBlock: {
+  // Checklist (v3 — replaces the old 30/60/90 phasing)
+  checklistBlock: {
     marginBottom: 18,
   },
-  phaseHeader: {
+  checklistHeader: {
     marginBottom: 8,
   },
-  phaseEyebrow: {
+  checklistEyebrow: {
     fontSize: 8.5,
     fontFamily: "Helvetica-Bold",
     letterSpacing: 1.4,
@@ -222,7 +217,7 @@ const styles = StyleSheet.create({
     textTransform: "uppercase",
     marginBottom: 4,
   },
-  phaseTitle: {
+  checklistTitle: {
     fontSize: 14,
     fontFamily: "Helvetica-Bold",
     color: COLORS.ink,
@@ -347,17 +342,17 @@ function QuickWinCallout({ quickWin }: { quickWin: string }) {
   );
 }
 
-function PhaseBlock({ phase, eyebrow }: { phase: ReportPhase; eyebrow: string }) {
+function ChecklistBlock({ items }: { items: string[] }) {
   return React.createElement(
     View,
-    { style: styles.phaseBlock },
+    { style: styles.checklistBlock },
     React.createElement(
       View,
-      { style: styles.phaseHeader },
-      React.createElement(Text, { style: styles.phaseEyebrow }, eyebrow),
-      React.createElement(Text, { style: styles.phaseTitle }, phase.title)
+      { style: styles.checklistHeader },
+      React.createElement(Text, { style: styles.checklistEyebrow }, "Your 30-day checklist"),
+      React.createElement(Text, { style: styles.checklistTitle }, "What to ship in the next 30 days")
     ),
-    ...phase.actions.map((a, i) =>
+    ...items.map((a, i) =>
       React.createElement(
         View,
         { key: `a${i}`, style: [styles.action, i === 0 ? styles.actionFirst : {}] },
@@ -411,14 +406,9 @@ export function ReportDocument({ report, lead }: { report: ReportData; lead: Rep
       // Quick Win
       report.quickWin && React.createElement(QuickWinCallout, { quickWin: report.quickWin }),
 
-      // 3 Phases
-      ...report.first90Days.map((p, i) =>
-        React.createElement(PhaseBlock, {
-          key: `p${i}`,
-          phase: p,
-          eyebrow: i === 0 ? "FIRST 30 DAYS" : i === 1 ? "NEXT 30 DAYS" : "DAYS 60–90",
-        })
-      ),
+      // 30-Day Checklist (v3 — replaces the old 3-phase first90Days)
+      report.checklist.length > 0 &&
+        React.createElement(ChecklistBlock, { items: report.checklist }),
 
       // Closer (LLM's nextStep)
       report.nextStep &&

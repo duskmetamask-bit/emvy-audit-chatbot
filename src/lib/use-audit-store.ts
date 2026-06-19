@@ -9,10 +9,10 @@
 // untouched and the `:create` / SSE / Resend flows only re-fire when the
 // persisted state says they should.
 //
-// v2 (2026-06-18): the report shape changed (no more findings/severity;
-// instead 3 opportunities + quickWin + first90Days). Assessment dropped
-// scores / categoriesCovered / currentCategory / budget / obstacles. Old
-// v1 keys on disk fail the new validators and are treated as EMPTY.
+// v3 (2026-06-19): report shape changed (no more first90Days 3-phase
+// bucket; flat `checklist: string[]` of 5-7 verb-first actions instead).
+// Replaces the 30/60/90 phasing the user pushed back on. Old v2 keys on
+// disk fail the new validators and are treated as EMPTY.
 //
 // Hand-rolled validators instead of Zod: the audit chatbot's package tree
 // does not declare zod as a runtime dependency, and this slice does not
@@ -21,8 +21,8 @@
 
 import { useCallback, useSyncExternalStore } from "react";
 
-const STORAGE_KEY = "emvy-audit-state:v2";
-const STORAGE_VERSION = 2 as const;
+const STORAGE_KEY = "emvy-audit-state:v3";
+const STORAGE_VERSION = 3 as const;
 
 export type Stage = "welcome" | "chat" | "email" | "building" | "report";
 
@@ -56,23 +56,18 @@ export interface ReportOpportunity {
   howFast: string;
 }
 
-export interface ReportPhase {
-  title: string;
-  actions: string[];
-}
-
 export interface ReportData {
   businessName: string;
   industry: string;
   summary: string;
   opportunities: ReportOpportunity[];
   quickWin: string;
-  first90Days: ReportPhase[];
+  checklist: string[];
   nextStep: string;
 }
 
 export interface AuditState {
-  version: 2;
+  version: 3;
   stage: Stage;
   messages: Message[];
   assessment: Assessment;
@@ -203,11 +198,6 @@ function isOpportunity(v: unknown): v is ReportOpportunity {
   );
 }
 
-function isReportPhase(v: unknown): v is ReportPhase {
-  if (!isObject(v)) return false;
-  return isString(v.title) && isStringArray(v.actions);
-}
-
 function isReportData(v: unknown): v is ReportData {
   if (!isObject(v)) return false;
   if (!isString(v.businessName)) return false;
@@ -215,7 +205,7 @@ function isReportData(v: unknown): v is ReportData {
   if (!isString(v.summary)) return false;
   if (!isArrayOf(v.opportunities, isOpportunity)) return false;
   if (!isString(v.quickWin)) return false;
-  if (!isArrayOf(v.first90Days, isReportPhase)) return false;
+  if (!isStringArray(v.checklist)) return false;
   if (!isString(v.nextStep)) return false;
   return true;
 }

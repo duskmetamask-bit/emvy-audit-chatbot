@@ -3,6 +3,10 @@
 // LLM returns prose, the parseRoadmap in /api/report fails silently
 // and the route falls back to deriveFallbackRoadmap — the generic
 // boilerplate. We want to see whether the LLM is the failure source.
+//
+// v3 (2026-06-19): report shape changed to 5-section with flat
+// `checklist: string[]` (5-7 items) replacing the old 30/60/90
+// phasing. Hermes is now in the named-tools list.
 
 import { chatCompletion } from "../src/lib/llm";
 import { REPORT_SYSTEM_PROMPT, emptyAssessment, Assessment } from "../src/lib/agent";
@@ -52,10 +56,10 @@ async function main() {
     },
   ];
 
-  console.log("=== /api/report LLM smoke ===\n");
+  console.log("=== /api/report LLM smoke (v3) ===\n");
   const t0 = Date.now();
   try {
-    const response = await chatCompletion({ messages, temperature: 0.6, maxTokens: 2400 });
+    const response = await chatCompletion({ messages, temperature: 0.6, maxTokens: 4096 });
     const ms = Date.now() - t0;
     const raw = response.choices?.[0]?.message?.content ?? "";
     console.log(`LLM returned ${ms}ms, ${raw.length} chars\n`);
@@ -77,6 +81,14 @@ async function main() {
         parsed.opportunities.forEach((o: { title?: string }, i: number) => {
           console.log(`    [${i + 1}] ${o.title ?? "(no title)"}`);
         });
+      }
+      if (Array.isArray(parsed.checklist)) {
+        console.log(`  checklist: ${parsed.checklist.length} items`);
+        parsed.checklist.forEach((a: string, i: number) => {
+          console.log(`    [${i + 1}] ${a.slice(0, 80)}${a.length > 80 ? "…" : ""}`);
+        });
+      } else {
+        console.log("  checklist: MISSING (v3 report should always have one)");
       }
     } catch (e) {
       console.log("PARSE FAIL:", (e as Error).message);
