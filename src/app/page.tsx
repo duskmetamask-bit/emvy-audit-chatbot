@@ -962,7 +962,7 @@ function ChatStage({
           />
         ))}
 
-        {assessment.readyForEmail && !isBotTyping && (
+        {(assessment.readyForEmail || (assessment.currentQuestion ?? 0) >= TOTAL_QUESTIONS) && !isBotTyping && (
           <div style={{ display: "flex", justifyContent: "flex-start" }} className="animate-fade-up">
             <button onClick={onGoToEmail} className="btn-primary">
               Get my roadmap

@@ -43,8 +43,20 @@ export async function POST(req: NextRequest) {
     return json({ error: "Empty message" }, 400);
   }
 
+  // JSON-only reminder: M2.7 occasionally drops the JSON envelope on
+  // turns 2-4 and emits prose instead. The reminder right after the
+  // main system prompt primes the contract before the model sees any
+  // conversation turns. Pair with the JSON-envelope history shape below
+  // (the model also sees its own JSON output in the assistant turns).
   const agentMessages: ChatMessage[] = [
     { role: "system", content: AUDIT_SYSTEM_PROMPT },
+    {
+      role: "system",
+      content:
+        "REMINDER: respond ONLY with a single JSON object. First char `{`, last char `}`. " +
+        "No prose outside the braces. No `think` blocks. No reasoning. No code fences. " +
+        "If you cannot form JSON, slow down internally and emit JSON — prose is the failure path.",
+    },
     {
       role: "system",
       content:
@@ -56,7 +68,23 @@ export async function POST(req: NextRequest) {
   for (const m of history) {
     if (!m || (m.role !== "user" && m.role !== "assistant")) continue;
     if (typeof m.content !== "string") continue;
-    agentMessages.push({ role: m.role, content: m.content });
+    if (m.role === "assistant") {
+      // Wrap prior assistant turns in the full JSON envelope. The model
+      // sees its own JSON output in the history and learns to keep the
+      // contract up. The current assessment is a stand-in for per-turn
+      // state (we don't snapshot it) — what matters is the SHAPE, not
+      // the values.
+      agentMessages.push({
+        role: "assistant",
+        content: JSON.stringify({
+          message: m.content,
+          currentQuestion: assessment.currentQuestion,
+          assessment,
+        }),
+      });
+    } else {
+      agentMessages.push({ role: m.role, content: m.content });
+    }
   }
   agentMessages.push({ role: "user", content: message });
 
