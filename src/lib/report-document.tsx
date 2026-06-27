@@ -3,10 +3,12 @@
 // it via Resend). Keeping the React tree in one place means a styling
 // change shows up in both the downloaded PDF and the emailed copy.
 //
-// v2 (2026-06-18): report shape changed. Now renders 5 sections —
-// cover (eyebrow + businessName + summary), 3 OpportunityCards, Quick
-// Win callout, flat checklist, closing nextStep. No findings block, no
-// hardcoded dark CTA at the bottom (the LLM's `nextStep` is the closer).
+// v3 (2026-06-25): report shape changed. Now renders 6 sections —
+// cover, 3 OpportunityCards, Automation Areas (4-6 named workflow
+// areas), Quick Win callout, flat 30-day checklist, closing nextStep.
+// The user pushed back that v2 buried automation inside opportunities/
+// checklist copy; v3 surfaces it as its own scan-friendly section so
+// the owner can read it before the action plan.
 
 import React from "react";
 import {
@@ -15,8 +17,6 @@ import {
   Text,
   View,
   StyleSheet,
-  Svg,
-  Path,
 } from "@react-pdf/renderer";
 
 export interface ReportOpportunity {
@@ -32,6 +32,7 @@ export interface ReportData {
   industry: string;
   summary: string;
   opportunities: ReportOpportunity[];
+  automationAreas: string[];
   quickWin: string;
   checklist: string[];
   nextStep: string;
@@ -63,12 +64,6 @@ function formatDate(): string {
   return new Date().toLocaleDateString("en-AU", { day: "numeric", month: "long", year: "numeric" });
 }
 
-function nameOrCompany(lead: ReportLead, report: ReportData): string {
-  if (lead.company) return lead.company;
-  if (report.businessName) return report.businessName;
-  return lead.name || "Your business";
-}
-
 const styles = StyleSheet.create({
   page: {
     paddingTop: 36,
@@ -80,58 +75,6 @@ const styles = StyleSheet.create({
     color: COLORS.text,
     backgroundColor: COLORS.bg,
   },
-  coverBrand: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 6,
-    marginBottom: 28,
-  },
-  coverBrandText: {
-    fontSize: 9,
-    fontFamily: "Helvetica-Bold",
-    letterSpacing: 1.6,
-    color: COLORS.accent,
-    textTransform: "uppercase",
-    marginLeft: 6,
-  },
-  coverEyebrow: {
-    fontSize: 9,
-    fontFamily: "Helvetica-Bold",
-    letterSpacing: 1.4,
-    color: COLORS.accent,
-    textTransform: "uppercase",
-    marginBottom: 6,
-  },
-  coverTitle: {
-    fontSize: 30,
-    fontFamily: "Helvetica-Bold",
-    letterSpacing: -0.6,
-    lineHeight: 1.05,
-    color: COLORS.ink,
-  },
-  coverTitleAccent: {
-    color: COLORS.textMuted,
-  },
-  coverSub: {
-    fontSize: 11,
-    lineHeight: 1.55,
-    color: COLORS.textSecondary,
-    marginTop: 10,
-    maxWidth: 460,
-  },
-  coverMeta: {
-    fontSize: 8.5,
-    color: COLORS.textMuted,
-    marginTop: 12,
-  },
-  accentRule: {
-    width: 32,
-    height: 3,
-    backgroundColor: COLORS.accent,
-    marginTop: 14,
-    marginBottom: 24,
-  },
-
   // Opportunities
   opportunityBlock: {
     paddingTop: 14,
@@ -173,6 +116,53 @@ const styles = StyleSheet.create({
     paddingTop: 2,
   },
   oppValue: {
+    flex: 1,
+    fontSize: 10.5,
+    lineHeight: 1.55,
+    color: COLORS.text,
+  },
+
+  // Automation areas (v3 — workflow map surfaced separately from opportunities)
+  automationAreasBlock: {
+    marginTop: 22,
+    marginBottom: 6,
+  },
+  automationAreasHeader: {
+    marginBottom: 10,
+  },
+  automationAreasEyebrow: {
+    fontSize: 8.5,
+    fontFamily: "Helvetica-Bold",
+    letterSpacing: 1.4,
+    color: COLORS.accent,
+    textTransform: "uppercase",
+    marginBottom: 4,
+  },
+  automationAreasTitle: {
+    fontSize: 14,
+    fontFamily: "Helvetica-Bold",
+    color: COLORS.ink,
+    letterSpacing: -0.2,
+  },
+  automationRow: {
+    flexDirection: "row",
+    paddingTop: 8,
+    paddingBottom: 8,
+    borderTopWidth: 0.5,
+    borderTopColor: "#EFEFEF",
+    alignItems: "flex-start",
+  },
+  automationRowFirst: {
+    borderTopWidth: 0,
+  },
+  automationBullet: {
+    fontSize: 8.5,
+    fontFamily: "Helvetica-Bold",
+    color: COLORS.accent,
+    width: 22,
+    paddingTop: 2,
+  },
+  automationText: {
     flex: 1,
     fontSize: 10.5,
     lineHeight: 1.55,
@@ -287,18 +277,6 @@ const styles = StyleSheet.create({
   },
 });
 
-function MVMark({ size = 14, color = COLORS.accent }: { size?: number; color?: string }) {
-  return React.createElement(
-    Svg,
-    { width: size, height: size, viewBox: "0 0 40 40" },
-    React.createElement(Path, {
-      d: "M3 4 H11 L20 21 L29 4 H37 V36 H29 V17 L22 28 L18 28 L11 17 V36 H3 Z M16.5 8 L20 14 L23.5 8 Z",
-      fill: color,
-      fillRule: "evenodd",
-    })
-  );
-}
-
 function OpportunityCard({ opportunity, index }: { opportunity: ReportOpportunity; index: number }) {
   const isFirst = index === 0;
   return React.createElement(
@@ -329,6 +307,27 @@ function OpportunityCard({ opportunity, index }: { opportunity: ReportOpportunit
       { style: styles.oppRow },
       React.createElement(Text, { style: styles.oppLabel }, "How fast"),
       React.createElement(Text, { style: styles.oppValue }, opportunity.howFast)
+    )
+  );
+}
+
+function AutomationAreasBlock({ items }: { items: string[] }) {
+  return React.createElement(
+    View,
+    { style: styles.automationAreasBlock },
+    React.createElement(
+      View,
+      { style: styles.automationAreasHeader },
+      React.createElement(Text, { style: styles.automationAreasEyebrow }, "Areas to automate"),
+      React.createElement(Text, { style: styles.automationAreasTitle }, "AI automation workflow map")
+    ),
+    ...items.map((text, i) =>
+      React.createElement(
+        View,
+        { key: `aa${i}`, style: [styles.automationRow, i === 0 ? styles.automationRowFirst : {}] },
+        React.createElement(Text, { style: styles.automationBullet }, String(i + 1).padStart(2, "0")),
+        React.createElement(Text, { style: styles.automationText }, text)
+      )
     )
   );
 }
@@ -376,32 +375,17 @@ export function ReportDocument({ report, lead }: { report: ReportData; lead: Rep
     React.createElement(
       Page,
       { size: "A4", style: styles.page },
-      // Cover header
-      React.createElement(
-        View,
-        { style: styles.coverBrand },
-        React.createElement(MVMark, { size: 16 }),
-        React.createElement(Text, { style: styles.coverBrandText }, "EMVY · MINI AI STRATEGY ASSESSMENT")
-      ),
-      React.createElement(Text, { style: styles.coverEyebrow }, "AI Strategy Report"),
-      React.createElement(
-        Text,
-        { style: styles.coverTitle },
-        report.businessName,
-        React.createElement(Text, { style: styles.coverTitleAccent }, " — your AI strategy")
-      ),
-      React.createElement(Text, { style: styles.coverSub }, report.summary),
-      React.createElement(
-        Text,
-        { style: styles.coverMeta },
-        `Prepared for ${nameOrCompany(lead, report)}  ·  ${date}  ·  ${lead.email}`
-      ),
-      React.createElement(View, { style: styles.accentRule }),
-
       // 3 Opportunities
       ...report.opportunities.map((o, i) =>
         React.createElement(OpportunityCard, { key: `o${i}`, opportunity: o, index: i })
       ),
+
+      // Automation Areas — workflow map (4-6 named areas with a one-line
+      // description of the trigger + target outcome). Sits between the
+      // opportunities and the quick win so the owner can scan "where
+      // AI fits" before reading "what to ship this week".
+      report.automationAreas.length > 0 &&
+        React.createElement(AutomationAreasBlock, { items: report.automationAreas }),
 
       // Quick Win
       report.quickWin && React.createElement(QuickWinCallout, { quickWin: report.quickWin }),
