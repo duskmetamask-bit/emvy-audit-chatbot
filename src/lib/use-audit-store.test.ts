@@ -6,6 +6,7 @@ import {
   type Message,
   type Assessment,
   type ReportData,
+  type Stage,
 } from "./use-audit-store";
 
 function fullAssessment(): Assessment {
@@ -56,6 +57,11 @@ function fullReport(): ReportData {
         howFast: "First nudge cycle lands in week 2.",
       },
     ],
+    automationAreas: [
+      "Lead capture — new web enquiry → auto-create CRM row + send acknowledgement inside 5 minutes",
+      "Invoice chasing — overdue > 7 days → Resend sends a friendly nudge, escalates after 14",
+      "Quote follow-up — quote sent > 48h with no reply → auto-draft a check-in for review",
+    ],
     quickWin: "This week: stop chasing payments by phone. Pick your top 5 outstanding invoices and call each one ONCE — after that, automate.",
     checklist: [
       "Audit your recurring copy-paste work and rank by pain — top item is your week 1 target.",
@@ -66,7 +72,7 @@ function fullReport(): ReportData {
       "Layer AI into the next-priority workflow — Hermes is the right shape for multi-step lead follow-up.",
       "Move to a weekly AI review cadence — what's working, what to retire, what to try next.",
     ],
-    nextStep: "Book a free 15-min discovery call with EMVY at https://emvyai.com/services/discovery-call!",
+    nextStep: "Book a free 15-min discovery call with EMVY at https://cal.com/jake-emvy/discovery-call!",
   };
 }
 
@@ -285,6 +291,58 @@ describe("parseAuditState", () => {
     expect(parseAuditState(state)).toEqual(state);
   });
 
+  it("accepts the 'onboarding' stage", () => {
+    // Onboarding wizard runs BEFORE the chat starts (replaces the old
+    // end-of-chat EmailStage). A persisted record with stage === "onboarding"
+    // is the new normal for users mid-wizard.
+    const base = fullState();
+    const withOnboarding = { ...base, stage: "onboarding" as Stage };
+    const out = parseAuditState(withOnboarding);
+    expect(out).not.toBe(null);
+    expect(out?.stage).toBe("onboarding");
+  });
+
+  it("round-trips a partial onboarding record (typed name + email, no chat yet)", () => {
+    // Realistic mid-wizard state: the user typed name/email in step 1 and
+    // reloaded before reaching step 2. Persisted fields survive, the
+    // wizard re-renders with the values pre-filled.
+    const partial: AuditState = {
+      ...EMPTY_AUDIT_STATE,
+      stage: "onboarding",
+      name: "Jane Smith",
+      email: "jane@example.com",
+      company: "",
+      sessionId: "sess-partial-1",
+    };
+    const out = parseAuditState(partial);
+    expect(out).toEqual(partial);
+  });
+
+  it("migrates a stale 'email' stage to 'onboarding' (legacy v3 records)", () => {
+    // Pre-wizard v3 records wrote stage: "email" while the user was on
+    // the end-of-chat email form. After the wizard shipped, those records
+    // would otherwise land on a dead screen. migrateLegacyStage snaps
+    // them forward; name/email/company on the stale record survive.
+    const base = fullState();
+    const staleEmail = {
+      ...base,
+      stage: "email",
+      name: "Jake",
+      email: "jake@duskplumbing.com.au",
+      company: "Dusk Plumbing",
+    };
+    // Cast: we know parseAuditState rejects "email" upstream then
+    // migrates it; the strict TS type prevents us from building this
+    // shape directly, so widen it for the test.
+    const out = parseAuditState(staleEmail as unknown as AuditState);
+    expect(out).not.toBe(null);
+    expect(out?.stage).toBe("onboarding");
+    expect(out?.name).toBe("Jake");
+    expect(out?.email).toBe("jake@duskplumbing.com.au");
+    expect(out?.company).toBe("Dusk Plumbing");
+    expect(out?.version).toBe(3);
+  });
+
   it("rejects assessment with stale v1 fields (scores / categoriesCovered / budget / obstacles)", () => {
     // The v1 shape had scores, categoriesCovered, currentCategory, budget,
     // obstacles — all dropped in v2. If a stale v2 payload has these as
@@ -441,10 +499,10 @@ describe("storage I/O", () => {
     (globalThis as Record<string, unknown>).localStorage = memStorage;
 
     const mod = await import("./use-audit-store");
-    mod.writePatch({ stage: "email" });
+    mod.writePatch({ stage: "onboarding" });
     const written = JSON.parse(memStorage.getItem("emvy-audit-state:v3") as string);
     expect(written.version).toBe(3);
-    expect(written.stage).toBe("email");
+    expect(written.stage).toBe("onboarding");
   });
 
   it("writePatch dispatches a synthetic StorageEvent for same-tab subscribers", async () => {
