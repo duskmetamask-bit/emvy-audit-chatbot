@@ -5,10 +5,14 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
+    "prebuild": "npm run typecheck",
     "start": "next start",
     "lint": "eslint",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit",
+    "sync:convex-types": "node scripts/sync-convex-types.mjs",
+    "verify:convex-types": "node scripts/verify-convex-types.mjs"
   },
   "dependencies": {
     "@react-pdf/renderer": "^4.5.1",

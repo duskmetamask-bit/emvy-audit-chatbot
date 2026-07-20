@@ -255,6 +255,8 @@ input, button, textarea {
   display: inline-flex;
   align-items: center;
   gap: var(--space-2);
+  white-space: nowrap;
+  flex-shrink: 0;
   transition: background var(--motion-fast) var(--ease-out),
               transform var(--motion-fast) var(--ease-out),
               box-shadow var(--motion-fast) var(--ease-out);
@@ -361,11 +363,11 @@ input, button, textarea {
   border-top-left-radius: 4px;
   padding: var(--space-4) var(--space-5);
   max-width: 82%;
-  box-shadow: var(--shadow-sm);
+  box-shadow: var(--shadow-sm), inset 3px 0 0 var(--accent);
 }
 
 .message-user {
-  background: var(--accent);
+  background: linear-gradient(180deg, var(--accent) 0%, var(--accent-press) 100%);
   color: var(--accent-ink);
   border-radius: var(--radius-lg);
   border-top-right-radius: 4px;
@@ -374,6 +376,7 @@ input, button, textarea {
   font-weight: 500;
   font-size: var(--text-sm);
   line-height: 1.5;
+  box-shadow: 0 6px 18px rgba(0, 229, 255, 0.22);
 }
 
 /* === PROGRESS === */
@@ -411,6 +414,22 @@ input, button, textarea {
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
 ::-webkit-scrollbar-thumb:hover { background: rgba(255, 255, 255, 0.12); }
+
+/* === RESPONSIVE WORDMARK === */
+/* Header wordmark: presence, not poster. 32px on phones, 44px on
+ * tablet+ — enough to read "EMVY · AI Consultancy" without dominating
+ * the viewport. The previous 112px desktop size ate ~25% of the
+ * hero on a 900px-tall laptop screen. */
+.brand-wordmark-responsive {
+  display: block;
+  height: 32px;
+  width: auto;
+}
+@media (min-width: 768px) {
+  .brand-wordmark-responsive {
+    height: 44px;
+  }
+}
 
 /* === PRINT === */
 @media print {

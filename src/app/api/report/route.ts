@@ -3,7 +3,7 @@
 // (build theater) and a final `data` event with the parsed ReportData JSON.
 //
 // Why SSE: the report is the climax of the flow. Streaming lets us
-// show "Building your roadmap..." stages in real-time, then fade the
+// show "Building your report..." stages in real-time, then fade the
 // final report in as the data lands. Beats a static spinner.
 //
 // v3 (2026-06-19): report shape changed. Now 5 sections — Strategy
@@ -27,7 +27,7 @@ interface ReportRequestBody {
   company?: string;
 }
 
-interface RoadmapOpportunity {
+interface ReportOpportunity {
   title: string;
   whatItIs: string;
   whyMatters: string;
@@ -35,11 +35,12 @@ interface RoadmapOpportunity {
   howFast: string;
 }
 
-interface RoadmapData {
+interface ReportData {
   businessName: string;
   industry: string;
   summary: string;
-  opportunities: RoadmapOpportunity[];
+  opportunities: ReportOpportunity[];
+  automationAreas: string[];
   quickWin: string;
   checklist: string[];
   nextStep: string;
@@ -53,7 +54,7 @@ function stripCodeFences(s: string): string {
   return out;
 }
 
-function deriveFallbackRoadmap(assessment: Assessment, lead: ReportRequestBody): RoadmapData {
+function deriveFallbackReport(assessment: Assessment, lead: ReportRequestBody): ReportData {
   const businessName = assessment.businessName || lead.company || lead.name || "Your business";
   const industry = assessment.industry || "your sector";
   const goal = assessment.goal || "more revenue with less manual grind";
@@ -62,7 +63,7 @@ function deriveFallbackRoadmap(assessment: Assessment, lead: ReportRequestBody):
   // them as it went). Fall back to a generic pair if the chat didn't
   // surface anything concrete.
   const seedTexts = (assessment.findings || []).map((f) => f.text).filter(Boolean);
-  const opportunities: RoadmapOpportunity[] = [];
+  const opportunities: ReportOpportunity[] = [];
   if (seedTexts.length > 0) {
     opportunities.push({
       title: "Automate the top leak",
@@ -98,22 +99,38 @@ function deriveFallbackRoadmap(assessment: Assessment, lead: ReportRequestBody):
     });
   }
 
+  // Fallback automation areas — generic enough to apply to most SMBs
+  // when the LLM fails. Seeded from the chat-side findings so the lead
+  // sees their own signals reflected.
+  const automationAreas: string[] = [
+    "Lead capture — new enquiry → auto-create CRM row + send acknowledgement inside 5 minutes",
+    "Quote follow-up — quote sent > 48h with no reply → auto-draft a check-in for review",
+    "Invoice chasing — invoice overdue > 7 days → send a friendly nudge, escalate after 14",
+    "Job scheduling — booking confirmed → calendar invite + crew SMS + job card draft",
+  ];
+  if (seedTexts.length > 0) {
+    automationAreas.push(
+      `Wrap the manual loop you flagged (${seedTexts[0].slice(0, 60)}${seedTexts[0].length > 60 ? "…" : ""}) — trigger + Zapier/Make + Resend/Sheets end-to-end`
+    );
+  }
+
   return {
     businessName,
     industry,
     summary: `${businessName} has a clear next move: ${opportunities[0].title.toLowerCase()}. Ship the quick win this week, then sequence the next two opportunities over the following 90 days.`,
     opportunities,
+    automationAreas,
     quickWin: "Pick one recurring task that takes 30+ minutes a week and automate it — even a rough version is a win this week.",
     checklist: [
       `List every recurring task that takes more than 30 minutes a week and rank them by pain — the top item is your week 1 target: ${opportunities[0].whatItIs}`,
-      "Set up a shared Notion or Google Doc so the team can see the roadmap.",
+      "Set up a shared Notion or Google Doc so the team can see the plan.",
       "Ship the week 1 automation end-to-end and measure the time it frees up.",
       "Set up automated invoice or follow-up reminders if cashflow or lead response is leaking (Zapier or Make + Resend).",
       "Brief the team on a lightweight AI policy — what's allowed, what's reviewed.",
       "Layer AI into the next-priority workflow (lead qualification, reporting, or scheduling) — Hermes is the right shape for multi-step reasoning loops.",
       "Move to a weekly AI review cadence — what's working, what to retire, what to try next.",
     ],
-    nextStep: `Book a free 15-min discovery call with EMVY and we'll map the exact automations to ${businessName}, sequence them by ROI, and ship the first one inside two weeks. https://emvyai.com/services/discovery-call`,
+    nextStep: `Next step — book a free 15-minute discovery call to see if EMVY is the right fit for ${businessName}: https://cal.com/jake-emvy/discovery-call`,
   };
 }
 
@@ -142,7 +159,7 @@ function mergeDuplicateActionsKeys(raw: string): string {
   );
 }
 
-function parseRoadmap(raw: string): RoadmapData | null {
+function parseReport(raw: string): ReportData | null {
   // 1. Strip think blocks (M2.7 emits <think>…</think> inline) so the
   //    JSON extractor doesn't see a `{` inside the reasoning.
   // 2. Strip code fences.
@@ -164,11 +181,11 @@ function parseRoadmap(raw: string): RoadmapData | null {
   }
   if (!parsed || typeof parsed !== "object") return null;
 
-  const asOpportunities = (v: unknown): RoadmapOpportunity[] => {
+  const asOpportunities = (v: unknown): ReportOpportunity[] => {
     if (!Array.isArray(v)) return [];
     return v
       .filter((x): x is Record<string, unknown> => x !== null && typeof x === "object")
-      .map((x): RoadmapOpportunity | null => {
+      .map((x): ReportOpportunity | null => {
         if (
           typeof x.title !== "string" ||
           typeof x.whatItIs !== "string" ||
@@ -186,7 +203,7 @@ function parseRoadmap(raw: string): RoadmapData | null {
           howFast: x.howFast.trim(),
         };
       })
-      .filter((o): o is RoadmapOpportunity => o !== null && o.title.length > 0);
+      .filter((o): o is ReportOpportunity => o !== null && o.title.length > 0);
   };
 
   const asChecklist = (v: unknown): string[] => {
@@ -201,6 +218,7 @@ function parseRoadmap(raw: string): RoadmapData | null {
     industry: typeof parsed.industry === "string" ? parsed.industry : "your sector",
     summary: typeof parsed.summary === "string" ? parsed.summary : "",
     opportunities: asOpportunities(parsed.opportunities),
+    automationAreas: asChecklist(parsed.automationAreas),
     quickWin: typeof parsed.quickWin === "string" ? parsed.quickWin : "",
     checklist: asChecklist(parsed.checklist),
     nextStep: typeof parsed.nextStep === "string" ? parsed.nextStep : "",
@@ -237,7 +255,7 @@ export async function POST(req: NextRequest) {
   // JSON-only reminder: M2.7 sometimes emits invalid JSON (e.g.
   // duplicate `"actions"` keys) or wraps the JSON in a think block.
   // The reminder primes the contract before the model sees the user
-  // request. Pair with the more tolerant parseRoadmap below so even a
+  // request. Pair with the more tolerant parseReport below so even a
   // slip lands the report.
   const messages: ChatMessage[] = [
     { role: "system" as const, content: REPORT_SYSTEM_PROMPT },
@@ -285,28 +303,27 @@ export async function POST(req: NextRequest) {
       }
 
       let fullText = "";
-      let parsed: RoadmapData | null = null;
+      let parsed: ReportData | null = null;
       let llmError: string | null = null;
 
       try {
         for await (const delta of chatCompletionStream({
           messages,
           temperature: 0.6,
-          // Bumped from 2400 → 4096. M2.7 emits a long think block
-          // (~1500-2000 tokens) before the JSON, then needs ~2000
-          // tokens for the actual 5-section report. 2400 was cutting
-          // the JSON off mid-stream and the parser was rejecting the
-          // truncated output, so users were getting the generic
-          // boilerplate fallback. 4096 fits the think block + a full
-          // report with breathing room.
-          maxTokens: 4096,
+          // Reduced from 4096 → 2048 to stay under Vercel Hobby's 10s
+          // serverless timeout. M2.7's think block (~1000-1500 tokens)
+          // + the JSON report (~500-800 tokens) fits in 2048. If the
+          // LLM doesn't finish within 8s the AbortSignal fires and we
+          // fall back to the deterministic report generator.
+          maxTokens: 2048,
+          signal: AbortSignal.timeout(8000),
         })) {
           fullText += delta;
           // Send raw deltas too — the frontend can ignore them, but
           // it's available if we want a typewriter effect later.
           send("token", { delta });
         }
-        parsed = parseRoadmap(fullText);
+        parsed = parseReport(fullText);
       } catch (err: unknown) {
         llmError = err instanceof Error ? err.message : "LLM stream failed";
       }
@@ -317,7 +334,7 @@ export async function POST(req: NextRequest) {
       if (!parsed || parsed.opportunities.length === 0) {
         // Either the LLM failed or the output wasn't valid JSON. Use the
         // deterministic fallback. The user still gets a real report.
-        const fallback = deriveFallbackRoadmap(assessment, body);
+        const fallback = deriveFallbackReport(assessment, body);
         send("status", { stage: "fallback", label: "Finalising your report" });
         send("data", { report: fallback, fallback: true, error: llmError });
       } else {

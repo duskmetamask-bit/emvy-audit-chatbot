@@ -65,7 +65,7 @@ function fullReport(): ReportData {
     quickWin: "This week: stop chasing payments by phone. Pick your top 5 outstanding invoices and call each one ONCE — after that, automate.",
     checklist: [
       "Audit your recurring copy-paste work and rank by pain — top item is your week 1 target.",
-      "Set up a shared Notion or Google Doc so the team can see the roadmap.",
+      "Set up a shared Notion or Google Doc so the team can see the plan.",
       "Ship the week 1 automation end-to-end and measure the time it frees up.",
       "Wire Xero to Zapier to Resend so unpaid invoices trigger a reminder at days 3, 7, and 14 — cuts collections cycle by ~40%.",
       "Brief the team on a lightweight AI policy — what's allowed, what's reviewed.",

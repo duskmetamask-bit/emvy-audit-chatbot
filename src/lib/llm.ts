@@ -42,6 +42,7 @@ export interface ChatRequest {
   temperature?: number;
   maxTokens?: number;
   stream?: boolean;
+  signal?: AbortSignal;
 }
 
 export interface ChatChoice {
@@ -119,6 +120,7 @@ export async function* chatCompletionStream(req: ChatRequest): AsyncGenerator<st
       [authHeader]: authValue,
     },
     body: JSON.stringify(body),
+    signal: req.signal,
   });
   if (!res.ok) {
     const errText = await res.text();

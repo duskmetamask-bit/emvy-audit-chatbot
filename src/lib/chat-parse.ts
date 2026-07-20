@@ -70,6 +70,42 @@ function stripCodeFences(s: string): string {
   return out;
 }
 
+// Permissive extraction of the `message` field when the envelope fails
+// to parse (typically because the model emitted an unescaped `"` inside
+// the message body, e.g. "that's a common pattern"). We match the
+// opening `"message"\s*:\s*"` and grab up to the next unescaped `"`.
+// Returns null if the field can't be located.
+function extractMessageField(raw: string): string | null {
+  const key = '"message"';
+  const keyIdx = raw.indexOf(key);
+  if (keyIdx === -1) return null;
+  const colon = raw.indexOf(":", keyIdx + key.length);
+  if (colon === -1) return null;
+  // Skip past `:` and any whitespace; require the value to start with a quote.
+  let i = colon + 1;
+  while (i < raw.length && /\s/.test(raw[i])) i++;
+  if (raw[i] !== '"') return null;
+  i++;
+  let out = "";
+  let escape = false;
+  for (; i < raw.length; i++) {
+    const ch = raw[i];
+    if (escape) {
+      out += ch;
+      escape = false;
+      continue;
+    }
+    if (ch === "\\") {
+      escape = true;
+      continue;
+    }
+    if (ch === '"') return out;
+    out += ch;
+  }
+  // No closing quote — return what we have rather than nothing.
+  return out || null;
+}
+
 function asString(v: unknown): string | undefined {
   return typeof v === "string" && v.trim().length > 0 ? v.trim() : undefined;
 }
@@ -119,14 +155,18 @@ export function parseChatResponse(raw: string, current: Assessment): ParsedChatR
   try {
     parsed = JSON.parse(json) as Record<string, unknown>;
   } catch {
-    // Malformed JSON inside the braces — fall back to prose. Keep
-    // braces intact: the LLM can legitimately emit curly quotes in
-    // the message body (e.g. "we use {xero}"), and clobbering them
-    // turns a parseable reply into gibberish.
+    // Malformed JSON inside the braces — usually because the model
+    // emitted an unescaped quote inside the `message` string (M2.7 does
+    // this occasionally when the reply contains apostrophes like
+    // "that's" or contractions). Try a permissive regex extraction
+    // first; only fall back to the raw cleaned prose if the message
+    // field can't be located at all.
+    const messageField = extractMessageField(cleaned);
     const prose = cleaned.replace(/\s+/g, " ").trim();
-    if (!prose) return null;
+    const fallback = messageField ?? prose;
+    if (!fallback) return null;
     return {
-      message: prose,
+      message: fallback,
       assessmentUpdate: {},
       currentQuestion: undefined,
     };
@@ -141,8 +181,12 @@ export function parseChatResponse(raw: string, current: Assessment): ParsedChatR
 
   const update: Partial<Assessment> = {};
 
+  // businessName: the wizard is the source of truth (sets it from the
+  // company field the user types). The model frequently sets nonsense
+  // like "the user" or "your business" — only accept an LLM-set value
+  // when the wizard hasn't already populated one.
   const businessName = asString(a.businessName);
-  if (businessName) update.businessName = businessName;
+  if (businessName && !current.businessName) update.businessName = businessName;
   const businessDescription = asString(a.businessDescription);
   if (businessDescription) update.businessDescription = businessDescription;
   const teamSize = asString(a.teamSize);

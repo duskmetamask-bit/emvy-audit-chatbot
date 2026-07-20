@@ -51,7 +51,7 @@ export async function POST(req: NextRequest) {
       status: 200,
       headers: {
         "Content-Type": "application/pdf",
-        "Content-Disposition": `attachment; filename="emvy-roadmap-${slug}.pdf"`,
+        "Content-Disposition": `attachment; filename="emvy-strategy-${slug}.pdf"`,
         "Cache-Control": "no-store",
       },
     });

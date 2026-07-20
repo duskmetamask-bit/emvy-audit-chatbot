@@ -24,7 +24,7 @@ import { useCallback, useSyncExternalStore } from "react";
 const STORAGE_KEY = "emvy-audit-state:v3";
 const STORAGE_VERSION = 3 as const;
 
-export type Stage = "welcome" | "chat" | "email" | "building" | "report";
+export type Stage = "welcome" | "onboarding" | "chat" | "building" | "report";
 
 export interface Message {
   role: "bot" | "user";
@@ -61,6 +61,7 @@ export interface ReportData {
   industry: string;
   summary: string;
   opportunities: ReportOpportunity[];
+  automationAreas: string[];
   quickWin: string;
   checklist: string[];
   nextStep: string;
@@ -131,9 +132,19 @@ function isArrayOf<T>(v: unknown, pred: (x: unknown) => x is T): v is T[] {
   return Array.isArray(v) && v.every(pred);
 }
 
-const STAGES = ["welcome", "chat", "email", "building", "report"] as const;
+const STAGES = ["welcome", "onboarding", "chat", "building", "report"] as const;
 function isStage(v: unknown): v is Stage {
   return typeof v === "string" && (STAGES as readonly string[]).includes(v);
+}
+
+// One-time migration: pre-wizard v3 records (those written by the prior
+// end-of-chat email form) used stage="email". Snap them forward so a user
+// who reloaded mid-form lands on the new wizard, not a dead screen. The
+// migration is forgiving — name/email/company on a stale record survive
+// intact (we never throw them away).
+function migrateLegacyStage(stage: string): Stage {
+  if (stage === "email") return "onboarding";
+  return stage as Stage;
 }
 
 const ROLES = ["bot", "user"] as const;
@@ -204,6 +215,11 @@ function isReportData(v: unknown): v is ReportData {
   if (!isString(v.industry)) return false;
   if (!isString(v.summary)) return false;
   if (!isArrayOf(v.opportunities, isOpportunity)) return false;
+  // v4 added `automationAreas`. Old v3 reports on disk don't have it —
+  // treat the missing field as an empty array so the validator still
+  // accepts pre-v4 payloads (the recovery path in page.tsx sets the
+  // field from the Convex row, not from localStorage).
+  if (v.automationAreas !== undefined && !isStringArray(v.automationAreas)) return false;
   if (!isString(v.quickWin)) return false;
   if (!isStringArray(v.checklist)) return false;
   if (!isString(v.nextStep)) return false;
@@ -213,7 +229,12 @@ function isReportData(v: unknown): v is ReportData {
 export function parseAuditState(raw: unknown): AuditState | null {
   if (!isObject(raw)) return null;
   if (raw.version !== STORAGE_VERSION) return null;
-  if (!isStage(raw.stage)) return null;
+  if (typeof raw.stage !== "string") return null;
+  // Apply stage migration BEFORE the Stage allow-list check so a stale
+  // "email" record (pre-wizard v3) snaps forward to "onboarding" instead
+  // of being rejected as an unknown stage.
+  const migratedStage = migrateLegacyStage(raw.stage);
+  if (!isStage(migratedStage)) return null;
   if (!isArrayOf(raw.messages, isMessage)) return null;
   if (!isAssessment(raw.assessment)) return null;
   if (!isString(raw.sessionId)) return null;
@@ -227,14 +248,25 @@ export function parseAuditState(raw: unknown): AuditState | null {
   if (raw.completedAt !== null && !isString(raw.completedAt)) return null;
   return {
     version: STORAGE_VERSION,
-    stage: raw.stage,
+    stage: migratedStage,
     messages: raw.messages,
     assessment: raw.assessment,
     sessionId: raw.sessionId,
     name: raw.name,
     email: raw.email,
     company: raw.company,
-    report: raw.report,
+    report: raw.report
+      ? {
+          ...raw.report,
+          // v4 added `automationAreas`. Old v3 reports on disk don't have
+          // the field — backfill with [] so the in-memory shape matches
+          // the typed ReportData and the renderer doesn't crash.
+          automationAreas:
+            (raw.report as unknown as Record<string, unknown>).automationAreas !== undefined
+              ? ((raw.report as unknown as Record<string, unknown>).automationAreas as string[])
+              : [],
+        }
+      : null,
     chatbotLeadId: raw.chatbotLeadId,
     reportSent: raw.reportSent,
     startedAt: raw.startedAt,

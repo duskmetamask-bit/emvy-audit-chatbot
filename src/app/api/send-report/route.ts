@@ -53,8 +53,8 @@ function buildHtml(name: string, businessName: string, summary: string): string 
             <h1 style="margin:0 0 16px;font-size:22px;line-height:1.3;color:#FFFFFF;font-weight:600;">Hey ${esc(firstName)},</h1>
             <p style="margin:0 0 16px;font-size:16px;line-height:1.55;color:#E8EEF4;">Your personalised AI strategy report for ${biz} is attached as a PDF.</p>
             <p style="margin:0 0 24px;font-size:15px;line-height:1.55;color:#9FB1C0;">${summaryHtml}</p>
-            <p style="margin:0 0 8px;font-size:15px;line-height:1.55;color:#E8EEF4;">Next step — if you want help mapping the right AI process for your business, book a free discovery call:</p>
-            <p style="margin:0 0 32px;"><a href="https://emvyai.com/services/discovery-call" style="display:inline-block;background:#56D9FF;color:#0A1118;text-decoration:none;font-weight:600;padding:12px 20px;border-radius:8px;font-size:15px;">Book free discovery call</a></p>
+            <p style="margin:0 0 8px;font-size:15px;line-height:1.55;color:#E8EEF4;">Next step — if you'd like to see if EMVY is the right fit, book a free 15-minute discovery call:</p>
+            <p style="margin:0 0 32px;"><a href="https://cal.com/jake-emvy/discovery-call" style="display:inline-block;background:#56D9FF;color:#0A1118;text-decoration:none;font-weight:600;padding:12px 20px;border-radius:8px;font-size:15px;">Book free discovery call</a></p>
             <p style="margin:0 0 4px;font-size:15px;line-height:1.55;color:#E8EEF4;">Talk soon,</p>
             <p style="margin:0;font-size:15px;line-height:1.55;color:#E8EEF4;">— Jake, EMVY</p>
           </td></tr>
@@ -75,8 +75,8 @@ Your personalised AI strategy report for ${biz} is attached as a PDF.
 
 ${summary || ""}
 
-Next step — if you want help mapping the right AI process for your business, book a free discovery call:
-https://emvyai.com/services/discovery-call
+Next step — if you'd like to see if EMVY is the right fit, book a free 15-minute discovery call:
+https://cal.com/jake-emvy/discovery-call
 
 Talk soon,
 — Jake, EMVY
@@ -120,7 +120,7 @@ export async function POST(req: NextRequest) {
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/(^-|-$)/g, "")
     .slice(0, 40);
-  const filename = `emvy-roadmap-${slug}.pdf`;
+  const filename = `emvy-strategy-${slug}.pdf`;
 
   const subject = body.report.businessName
     ? `Your ${body.report.businessName} AI strategy report`

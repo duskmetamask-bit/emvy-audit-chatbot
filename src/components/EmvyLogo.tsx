@@ -25,21 +25,31 @@ export function EmvyLogo({
   className,
   title = "EMVY",
 }: EmvyLogoProps) {
+  // Preserve the icon's native 2:1 aspect ratio. The PNG is 426×204 — a
+  // horizontal mark — so a square box stretches it horizontally. When
+  // `className` is passed we let CSS take over (height-based sizing keeps
+  // the aspect intact too).
   return (
     <img
       src="/brand/logo-icon.png"
       alt={title}
-      width={size}
+      width={size * 2}
       height={size}
       className={className}
-      style={{ display: "block", width: size, height: size }}
+      style={
+        className
+          ? { display: "block" }
+          : { display: "block", width: size * 2, height: size }
+      }
     />
   );
 }
 
 // Horizontal lockup: mark on the left, "emvy" wordmark on the right.
 // Mirrors the EmvyWordmark on the marketing site so the chatbot and the
-// website read as one product.
+// website read as one product. `height` is a default applied only when no
+// `className` is passed; CSS className wins so callers can drive
+// responsive sizing via media queries (e.g. `brand-wordmark-responsive`).
 export function EmvyWordmark({
   height = 28,
   className,
@@ -47,16 +57,17 @@ export function EmvyWordmark({
   height?: number;
   className?: string;
 }) {
+  const isResponsive = Boolean(className);
   return (
     <img
       src="/brand/logo-wordmark.png"
       alt="EMVY · AI Consultancy"
       className={className}
-      style={{
-        display: "block",
-        height,
-        width: "auto",
-      }}
+      style={
+        isResponsive
+          ? { display: "block", width: "auto" }
+          : { display: "block", height, width: "auto" }
+      }
     />
   );
 }

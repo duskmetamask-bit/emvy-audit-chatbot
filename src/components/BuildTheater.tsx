@@ -1,7 +1,6 @@
 "use client";
 
 import * as React from "react";
-import { EmvyLogo } from "./EmvyLogo";
 
 export type BuildStage = {
   key: string;
@@ -29,16 +28,7 @@ export function BuildTheater({ stages, businessName }: BuildTheaterProps) {
       }}
       className="animate-fade-up"
     >
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          gap: 12,
-        }}
-      >
-        <EmvyLogo size={20} />
-        <span className="label-eyebrow-accent">EMVY · Building your roadmap</span>
-      </div>
+      <div className="label-eyebrow-accent">EMVY · Building your report</div>
 
       <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
         <h1
@@ -49,7 +39,7 @@ export function BuildTheater({ stages, businessName }: BuildTheaterProps) {
             lineHeight: 1.1,
           }}
         >
-          Building your 30/60/90 roadmap
+          Building your 30-day report
         </h1>
         {businessName && (
           <p
@@ -79,27 +69,6 @@ export function BuildTheater({ stages, businessName }: BuildTheaterProps) {
         ))}
       </div>
 
-      <div
-        className="label-meta"
-        style={{
-          marginTop: 16,
-          display: "flex",
-          alignItems: "center",
-          gap: 8,
-        }}
-      >
-        <span
-          style={{
-            display: "inline-block",
-            width: 6,
-            height: 6,
-            borderRadius: 3,
-            background: "var(--accent)",
-            animation: "pulseDot 1.4s ease-in-out infinite",
-          }}
-        />
-        Streaming from EMVY · M2.7
-      </div>
     </div>
   );
 }
@@ -111,18 +80,37 @@ function StageRow({ stage, index }: { stage: BuildStage; index: number }) {
   return (
     <div
       style={{
+        position: "relative",
         display: "flex",
         alignItems: "center",
         gap: 14,
         padding: "12px 14px",
         borderRadius: 10,
-        background: isActive ? "var(--accent-dim)" : "transparent",
+        background: isActive
+          ? "linear-gradient(90deg, var(--accent-dim) 0%, rgba(0,229,255,0.02) 100%)"
+          : "transparent",
         border: isActive ? "1px solid var(--border-accent)" : "1px solid transparent",
+        boxShadow: isActive ? "0 4px 16px rgba(0, 229, 255, 0.10)" : "none",
         transition:
-          "background var(--motion-base) var(--ease-out), border-color var(--motion-base) var(--ease-out)",
+          "background var(--motion-base) var(--ease-out), border-color var(--motion-base) var(--ease-out), box-shadow var(--motion-base) var(--ease-out)",
         animationDelay: `${index * 60}ms`,
+        overflow: "hidden",
       }}
     >
+      {isActive && (
+        <span
+          aria-hidden="true"
+          style={{
+            position: "absolute",
+            left: 0,
+            top: 8,
+            bottom: 8,
+            width: 2,
+            borderRadius: 2,
+            background: "var(--accent)",
+          }}
+        />
+      )}
       <span
         style={{
           width: 18,

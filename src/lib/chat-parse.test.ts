@@ -163,6 +163,33 @@ describe("parseChatResponse", () => {
     expect(out!.assessmentUpdate).toEqual({});
   });
 
+  it("recovers the message field when JSON.parse fails due to unescaped quote in body", () => {
+    // M2.7 sometimes emits a `"` inside the message body without escaping
+    // it (e.g. apostrophes written as `"'` rather than `'`). The whole
+    // envelope is then invalid JSON, but the message field is still
+    // there — extract it permissively rather than dumping the envelope
+    // into the bubble.
+    const broken =
+      '{"message":"got it — residential emergency and renos, that\'s a good mix. ok, first question: what eats your time?","currentQuestion":2,"assessment":{"businessName":"plumbing"}}';
+    const out = parseChatResponse(broken, current());
+    expect(out).not.toBe(null);
+    expect(out!.message).not.toMatch(/^\{/);
+    expect(out!.message).not.toContain('"message"');
+    expect(out!.message).toContain("got it");
+    expect(out!.message).toContain("residential emergency");
+  });
+
+  it("recovers the message field when surrounding envelope has trailing garbage", () => {
+    // Even more degenerate: model emits the JSON with extra prose AFTER
+    // the closing brace (which makes the brace-walker balance but
+    // JSON.parse fails for an unrelated reason).
+    const broken =
+      '{"message":"hey there, ready when you are","currentQuestion":1,"assessment":{}} trailing prose that breaks parse';
+    const out = parseChatResponse(broken, current());
+    expect(out).not.toBe(null);
+    expect(out!.message).toBe("hey there, ready when you are");
+  });
+
   it("extracts findings without severity (v2 dropped the field)", () => {
     const raw = JSON.stringify({
       message: "ok",
@@ -206,6 +233,37 @@ describe("parseChatResponse", () => {
 
     const filledRaw = JSON.stringify({ message: "ok", assessment: { painPoints: ["x", "y"] } });
     expect(parseChatResponse(filledRaw, current())!.assessmentUpdate.painPoints).toEqual(["x", "y"]);
+  });
+
+  it("does not overwrite a wizard-set businessName with an LLM-supplied value", () => {
+    // The wizard sets businessName from the company field. M2.7 will
+    // often echo "the user" or "your business" in its businessName
+    // field — those are obvious noise and must not replace the
+    // wizard-supplied name. If the wizard didn't set one (skipped or
+    // failed), the LLM value is allowed through.
+    const filled = {
+      ...emptyAssessment(),
+      businessName: "Smith Plumbing",
+      findings: [],
+      painPoints: [],
+      manualTasks: [],
+      messageCount: 1,
+      readyForEmail: false,
+    };
+    const raw = JSON.stringify({
+      message: "ok",
+      assessment: { businessName: "the user" },
+    });
+    const out = parseChatResponse(raw, filled)!;
+    expect(out.assessmentUpdate.businessName).toBeUndefined();
+
+    const empty = { ...emptyAssessment(), businessName: "" } as Assessment;
+    const raw2 = JSON.stringify({
+      message: "ok",
+      assessment: { businessName: "Dusk Plumbing" },
+    });
+    const out2 = parseChatResponse(raw2, empty)!;
+    expect(out2.assessmentUpdate.businessName).toBe("Dusk Plumbing");
   });
 
   it("drops removed v1 fields (scores, categoriesCovered, currentCategory, budget, obstacles)", () => {
